@@ -1,0 +1,163 @@
+# Docker Compose 4;O AI-?@>402F0 A 0C48> ?>445@6:>9
+# © SoVAni 2025
+
+version: '3.8'
+
+services:
+  # PostgreSQL 1070 40==KE
+  postgres:
+    image: postgres:15-alpine
+    container_name: ai_seller_postgres
+    environment:
+      POSTGRES_USER: ai_seller
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-strong_password_123}
+      POSTGRES_DB: ai_seller_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../scripts/migrate_full_schema.sql:/docker-entrypoint-initdb.d/01_init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_seller -d ai_seller_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - ai_seller_network
+
+  # Redis 4;O :5H8@>20=8O 8 A5AA89
+  redis:
+    image: redis:7-alpine
+    container_name: ai_seller_redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_password_123}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - ai_seller_network
+
+  # A=>2=>5 ?@8;>65=85 AI-?@>402F0
+  ai_seller:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: ai_seller_app
+    environment:
+      # A=>2=K5 =0AB@>9:8
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      
+      # 070 40==KE
+      - POSTGRES_DSN=postgres://ai_seller:${POSTGRES_PASSWORD:-strong_password_123}@postgres:5432/ai_seller_db?sslmode=disable
+      
+      # Redis
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password_123}@redis:6379/0
+      - REDIS_ADDR=redis:6379
+      
+      # !5@25@K
+      - PORT=8080
+      - HEALTHCHECK_PORT=8082
+      
+      # C48> =0AB@>9:8
+      - AUDIO_TEMP_DIR=/tmp/ai_seller_audio
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      
+      # >38@>20=85
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      
+    volumes:
+      # @5<5==0O 48@5:B>@8O 4;O 0C48> D09;>2
+      - audio_temp:/tmp/ai_seller_audio
+      # >38 (>?F8>=0;L=>)
+      - ./logs:/app/logs
+    ports:
+      - "8080:8080"  # Go API
+      - "8082:8082"  # Health check
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - ai_seller_network
+
+  # Nginx reverse proxy (>?F8>=0;L=>)
+  nginx:
+    image: nginx:alpine
+    container_name: ai_seller_nginx
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - ai_seller
+    restart: unless-stopped
+    networks:
+      - ai_seller_network
+
+  # Grafana 4;O <>=8B>@8=30 (>?F8>=0;L=>)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ai_seller_grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../monitoring/grafana:/etc/grafana/provisioning
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    networks:
+      - ai_seller_network
+
+  # Prometheus 4;O <5B@8: (>?F8>=0;L=>)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ai_seller_prometheus
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - ai_seller_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  grafana_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  audio_temp:
+    driver: local
+
+networks:
+  ai_seller_network:
+    driver: bridge
