@@ -1,0 +1,59 @@
+providers:
+  logic:
+    model: gpt-4-turbo
+    api_key_env: OPENAI_API_KEY
+  emotion:
+    model: claude-3-opus
+    api_key_env: ANTHROPIC_API_KEY
+  fallback:
+    model: gpt-3.5-turbo
+    api_key_env: OPENAI_API_KEY
+
+audio:
+  speech_to_text:
+    provider: openai  # openai, google, azure
+    model: whisper-1
+    language: ru
+    max_duration_seconds: 120  # Максимальная длительность голосовых сообщений
+    max_audio_duration_seconds: 300  # Максимальная длительность аудио файлов
+    api_key_env: OPENAI_API_KEY
+  
+  text_to_speech:
+    provider: openai  # elevenlabs заблокирован в РФ, используем openai
+    model: tts-1-hd  # HD качество для лучшего звука
+    voice: nova  # Женский голос, наиболее похожий на "Алену"
+    response_format: mp3
+    api_key_env: OPENAI_API_KEY
+    
+    # Настройки для имитации голоса "Алены"
+    text_preprocessing:
+      add_personality: true
+      russian_pronunciation: true
+    
+    # Настройки голоса Алены
+    voice_settings:
+      stability: 0.65        # Стабильность произношения
+      similarity_boost: 0.75 # Схожесть с оригиналом
+      style: 0.2            # Эмоциональность
+      use_speaker_boost: true
+    
+    # Производительность
+    max_workers: 3          # Параллельные worker'ы для TTS
+    connection_timeout: 60  # Таймаут соединения (для VPN)
+    request_timeout: 120    # Таймаут запроса
+    max_retries: 3          # Количество повторов
+    
+  # Фоллбэк провайдер OpenAI TTS (при сбоях ElevenLabs)
+  openai_fallback:
+    enabled: true
+    api_key_env: OPENAI_API_KEY
+    model: tts-1
+    voice: nova  # Женский голос, похожий на Алену
+    # Доступные голоса: alloy, echo, fable, onyx, nova, shimmer
+    
+  # Настройки обработки аудио
+  processing:
+    temp_dir: /tmp/ai_seller_audio
+    cleanup_interval_hours: 24
+    max_file_size_mb: 25  # Максимальный размер аудио файлов
+
