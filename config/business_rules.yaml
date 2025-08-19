@@ -1,0 +1,21 @@
+moq:
+  turnkey_per_color: 1000
+scheduling:
+  promise_exact_dates: false
+  allow_partial_shipments: true
+pricing:
+  push_for_budget_if_client_refuses: false
+  mode_default: factory_quote
+  quote_variants: ["econom", "base", "premium"]
+conversation:
+  greet_once_per_day: true
+  ask_one_question_at_time: true
+  stop_repeating_if_client_refuses: true
+guards:
+  role_reset_patterns:
+    - "ignore previous instructions"
+    - "you are no longer"
+    - "system:"
+    - "developer:"
+    - "поменяй роль"
+    - "игнорируй инструкции"

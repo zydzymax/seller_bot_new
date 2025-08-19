@@ -1,0 +1,23 @@
+openai:
+  default_model: "gpt-5"
+  fallback_model: "gpt-4-turbo"
+  timeout: 15
+  max_retries: 3
+  backoff_base: 0.5
+  backoff_max: 2.0
+  cache_ttl: 3600
+  
+circuit_breaker:
+  failure_threshold: 5
+  timeout: 60
+  recovery_timeout: 120
+
+rate_limits:
+  requests_per_minute: 60
+  tokens_per_minute: 150000
+
+cost_tracking:
+  enabled: true
+  currency: "RUB"
+  gpt5_rub_per_1k_tokens: 0.8
+  gpt4_turbo_rub_per_1k_tokens: 0.6

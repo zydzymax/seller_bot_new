@@ -1,0 +1,29 @@
+{
+  "patterns": {
+    "positive": {
+      "keywords": [">B;8G=>", "E>@>H>", "AC?5@", "70<5G0B5;L=>", "8=B5@5A=>", "?>=@028;>AL"],
+      "response_tone": "enthusiastic",
+      "escalation_speed": "fast"
+    },
+    "neutral": {
+      "keywords": ["E<", "?>=OB=>", "OA=>", "E>@>H>", "40"],
+      "response_tone": "professional",
+      "escalation_speed": "normal"
+    },
+    "frustrated": {
+      "keywords": ["=5 ?>=8<0N", "A;>6=>", "?@>1;5<0", "=5 ?>;CG05BAO", "B@C4=>"],
+      "response_tone": "empathetic",
+      "escalation_speed": "slow"
+    },
+    "skeptical": {
+      "keywords": ["A><=520NAL", "=5 C25@5=", "2>7<>6=>", "<>65B 1KBL", "?>4C<0N"],
+      "response_tone": "reassuring",
+      "escalation_speed": "careful"
+    },
+    "excited": {
+      "keywords": [">B;8G=>!", "40!", "8<5==>!", "B>G=>!", "40209B5!"],
+      "response_tone": "matching_energy",
+      "escalation_speed": "very_fast"
+    }
+  }
+}

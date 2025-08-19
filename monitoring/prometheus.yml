@@ -1,0 +1,62 @@
+# Prometheus конфигурация для SoVAni AI-продавца
+# © SoVAni 2025
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Alertmanager конфигурация
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - alertmanager:9093
+
+# Правила алертов
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+# Цели для сбора метрик
+scrape_configs:
+  # Сам Prometheus
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # SoVAni AI Seller приложение
+  - job_name: 'sovani-ai-seller'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    static_configs:
+      - targets: ['ai_seller:8000']
+    metrics_path: '/metrics'
+    basic_auth:
+      # Настройте аутентификацию если включена
+      # username: 'metrics_user'
+      # password: 'metrics_password'
+
+  # PostgreSQL exporter (если используется)
+  # - job_name: 'postgres'
+  #   static_configs:
+  #     - targets: ['postgres-exporter:9187']
+
+  # Redis exporter (если используется)  
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['redis-exporter:9121']
+
+  # Nginx exporter (если используется)
+  # - job_name: 'nginx'
+  #   static_configs:
+  #     - targets: ['nginx-exporter:9113']
+
+  # Node exporter для системных метрик (если используется)
+  # - job_name: 'node'
+  #   static_configs:
+  #     - targets: ['node-exporter:9100']
+
+  # cAdvisor для Docker метрик (если используется)
+  # - job_name: 'cadvisor'
+  #   static_configs:
+  #     - targets: ['cadvisor:8080']

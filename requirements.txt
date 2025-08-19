@@ -1,0 +1,45 @@
+# AI и машинное обучение
+openai>=1.0.0
+anthropic>=0.18.0
+
+# Telegram бот
+python-telegram-bot>=20.0
+aiogram>=3.0.0
+
+# HTTP клиенты
+aiohttp>=3.8.0
+requests>=2.28.0
+
+# Redis
+redis>=4.5.0
+aioredis>=2.0.0
+
+# База данных
+psycopg2-binary>=2.9.0
+asyncpg>=0.28.0
+
+# Конфигурация и логирование
+python-dotenv>=1.0.0
+pyyaml>=6.0
+structlog>=23.0.0
+
+# Аудио обработка
+aiofiles>=23.0.0  # Для асинхронной работы с файлами
+
+# Утилиты
+nest-asyncio>=1.5.0  # Для совместимости с Jupyter
+phonenumbers>=8.13.0  # Для парсинга телефонов
+
+# Веб-сервер
+aiohttp>=3.8.0
+
+# Тестирование
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+
+# Безопасность и валидация
+bleach>=6.0.0  # Для санитизации HTML
+validators>=0.20.0
+
+# Мониторинг
+prometheus-client>=0.16.0

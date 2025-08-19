@@ -1,0 +1,145 @@
+# >@>=:0 ?@>406 SoVAni - MB0?K >1@01>B:8 70:07>2
+stages:
+  # %>;>4=K9 :>=B0:B - ?5@2>5 >1@0I5=85 :;85=B0
+  cold:
+    name: "5@28G=K9 :>=B0:B"
+    objectives:
+      - 08=B5@5A>20BL :;85=B0
+      - KOA=8BL ?>B@51=>ABL
+      - 5@525AB8 2 0:B82=K9 480;>3
+    key_questions:
+      - "'B> ?;0=8@C5B5 ?@>872>48BL?"
+      - "0:85 >1J5<K @0AA<0B@8205B5?"
+    success_criteria:
+      - ;85=B >B25B8; =0 107>2K5 2>?@>AK
+      - >:070; 708=B5@5A>20==>ABL 2 ?@>4>;65=88
+    next_stage: "interested"
+
+  # 08=B5@5A>20==K9 :;85=B
+  interested:
+    name: "!1>@ 8=D>@<0F88"
+    objectives:
+      - !>1@0BL B5E=8G5A:>5 7040=85
+      - >=OBL >1J5<K 8 1N465B
+      - ?@545;8BL B8? A>B@C4=8G5AB20
+    key_questions:
+      - "020;LG5A:>5 AK@L5 8;8 ?>4 :;NG?"
+      - "ABL ;5:0;0 8 48709=?"
+      - "0:85 A@>:8 ?;0=8@C5B5?"
+    success_criteria:
+      - >;CG5=0 107>20O 8=D>@<0F8O > ?@>5:B5
+      - 1J5<K A>>B25BAB2CNB <8=8<C<0<
+      - ;85=B 3>B>2 : B5E=8G5A:><C >1AC645=8N
+    next_stage: "qualifying"
+
+  # 20;8D8:0F8O :;85=B0
+  qualifying:
+    name: ""5E=8G5A:0O :20;8D8:0F8O"
+    objectives:
+      - @>25@8BL ?;0B565A?>A>1=>ABL
+      - KOA=8BL >?KB @01>BK A ?@>872>48B5;O<8
+      - >=OBL :@8B5@88 2K1>@0 ?>AB02I8:0
+    key_questions:
+      - "0:>2 1N465B ?@>5:B0?"
+      - " 01>B0;8 ;8 @0=LH5 A ?@>872>48B5;O<8?"
+      - "'B> 206=55 - F5=0 8;8 :0G5AB2>?"
+    success_criteria:
+      - ;85=B :20;8D8F8@>20= :0: A5@L57=K9
+      - N465B A>>B25BAB2C5B AB>8<>AB8 ?@>872>4AB20
+      - >=OB=K B@51>20=8O : :0G5AB2C 8 A@>:0<
+    next_stage: "negotiating"
+
+  # 5@53>2>@K 8 @0AG5BK
+  negotiating:
+    name: "><<5@G5A:85 ?5@53>2>@K"
+    objectives:
+      - @54>AB028BL B>G=K9 @0AG5B
+      - 1AC48BL CA;>28O >?;0BK 8 ?>AB02:8
+      -  01>B0BL A 2>7@065=8O<8
+    key_questions:
+      - "#AB@08205B ;8 ?@54;>65==0O F5=0?"
+      - ">4E>4OB ;8 CA;>28O >?;0BK?"
+      - "ABL ;8 2>?@>AK ?> A@>:0<?"
+    success_criteria:
+      - ><<5@G5A:>5 ?@54;>65=85 ?@8=OB>
+      - #A;>28O A>3;0A>20=K
+      - >7@065=8O >B@01>B0=K
+    next_stage: "closing"
+
+  # 0:@KB85 A45;:8
+  closing:
+    name: "$8=0;870F8O 70:070"
+    objectives:
+      - >;CG8BL A>3;0A85 =0 70:07
+      - !>1@0BL 40==K5 4;O 4>3>2>@0
+      - 0?;0=8@>20BL A;54CNI85 H038
+    key_questions:
+      - "$8:A8@C5< 70:07?"
+      - ">340 <>65< ?@8ABC?8BL?"
+      - "0: ?@54?>G8B05B5 A2O70BLAO 4;O 4>3>2>@0?"
+    success_criteria:
+      - >;CG5=> A>3;0A85 =0 70:07
+      - !>1@0=K :>=B0:B=K5 40==K5
+      - 07=0G5=0 2AB@5G0/72>=>: 4;O >D>@<;5=8O
+    next_stage: "order_processing"
+
+  # 1@01>B:0 2>7@065=89
+  objection:
+    name: " 01>B0 A 2>7@065=8O<8"
+    objectives:
+      - KOA=8BL 8AB8==CN ?@8G8=C 2>7@065=8O
+      - @54;>68BL @5H5=85
+      - 5@=CBL 2 >A=>2=CN 2>@>=:C
+    common_objections:
+      - ">@>3>"
+      - ">;3>"
+      - "C6=> ?>4C<0BL"
+      - "ABL 4@C385 20@80=BK"
+    techniques:
+      - -<?0B8O 8 ?>=8<0=85
+      - >=:@5B=K5 D0:BK 8 F8D@K
+      - ;LB5@=0B82=K5 ?@54;>65=8O
+      - >?@>AK =0 CB>G=5=85
+    next_stage: "negotiating"
+
+# 0AB@>9:8 ?5@5E>4>2 <564C MB0?0<8
+transitions:
+  rules:
+    - from: "cold"
+      to: "interested"
+      condition: ";85=B >B25B8; =0 107>2K5 2>?@>AK"
+    
+    - from: "interested"
+      to: "qualifying"
+      condition: ">;CG5=0 107>20O 8=D>@<0F8O > ?@>5:B5"
+    
+    - from: "qualifying"
+      to: "negotiating"
+      condition: ";85=B :20;8D8F8@>20= :0: A5@L57=K9"
+    
+    - from: "negotiating"
+      to: "closing"
+      condition: "><<5@G5A:85 CA;>28O A>3;0A>20=K"
+    
+    - from: "any"
+      to: "objection"
+      condition: "K@065=> 2>7@065=85 8;8 A><=5=85"
+    
+    - from: "objection"
+      to: "previous_stage"
+      condition: ">7@065=85 >B@01>B0=>"
+
+# 5B@8:8 MDD5:B82=>AB8
+metrics:
+  conversion_rates:
+    cold_to_interested: 40  # %
+    interested_to_qualifying: 60  # %
+    qualifying_to_negotiating: 70  # %
+    negotiating_to_closing: 50  # %
+  
+  average_time_per_stage:
+    cold: 1  # 4=59
+    interested: 2  # 4=59
+    qualifying: 1  # 45=L
+    negotiating: 3  # 4=O
+    closing: 2  # 4=O
