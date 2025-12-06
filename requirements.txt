@@ -9,10 +9,10 @@ aiogram>=3.0.0
 # HTTP клиенты
 aiohttp>=3.8.0
 requests>=2.28.0
+httpx>=0.27.0
 
 # Redis
 redis>=4.5.0
-aioredis>=2.0.0
 
 # База данных
 psycopg2-binary>=2.9.0
@@ -31,7 +31,12 @@ nest-asyncio>=1.5.0  # Для совместимости с Jupyter
 phonenumbers>=8.13.0  # Для парсинга телефонов
 
 # Веб-сервер
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
 aiohttp>=3.8.0
+uvloop>=0.19.0 ; sys_platform != "win32"
+httptools>=0.6.1
 
 # Тестирование
 pytest>=7.0.0
@@ -42,4 +47,6 @@ bleach>=6.0.0  # Для санитизации HTML
 validators>=0.20.0
 
 # Мониторинг
-prometheus-client>=0.16.0
+prometheus-client>=0.20.0
+psutil>=5.9.0
+orjson>=3.10.0

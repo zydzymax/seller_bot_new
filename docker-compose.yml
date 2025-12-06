@@ -16,7 +16,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/migrate_schema.sql:/docker-entrypoint-initdb.d/01_init.sql
     ports:
-      - "5432:5432"
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sovani -d sovani_ai_seller"]
       interval: 10s
@@ -34,7 +34,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "6379:6379"
+      - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
       interval: 10s
@@ -65,7 +65,7 @@ services:
       - POSTGRES_DSN=postgresql://sovani:${POSTGRES_PASSWORD:-[REVOKED_SECRET_REMOVED]}@postgres:5432/sovani_ai_seller
       
       # Redis
-      - REDIS_ADDR=redis://sovani_redis:6379/0
+      - REDIS_ADDR=redis://:${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]}@sovani_redis:6379/0
       - REDIS_PASSWORD=${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]}
       
       # Webhook настройки
@@ -108,8 +108,9 @@ services:
       - ./logs:/app/logs
       # Временные файлы
       - ./temp:/app/temp
+    command: ["uvicorn", "bot.webhook:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--timeout-keep-alive", "30"]
     ports:
-      - "8000:8000"  # FastAPI webhook
+      - "8001:8000"  # FastAPI webhook
     depends_on:
       postgres:
         condition: service_healthy
@@ -118,27 +119,34 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
       interval: 30s
-      timeout: 10s
-      start_period: 60s
+      timeout: 5s
       retries: 3
     restart: unless-stopped
     networks:
       - sovani_network
 
-  # Nginx reverse proxy
-  nginx:
-    image: nginx:alpine
-    container_name: sovani_nginx
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    ports:
-      - "80:80"
-      - "443:443"
-    depends_on:
-      - ai_seller
-    restart: unless-stopped
-    networks:
-      - sovani_network
+  # Nginx reverse proxy - ОТКЛЮЧЕН (конфликт с системным nginx)
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: sovani_nginx
+  #   command: ["nginx", "-g", "daemon off;"]
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #   ports:
+  #     - "8080:80"
+  #     - "8443:443"
+  #   depends_on:
+  #     - ai_seller
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+  #     interval: 30s
+  #     timeout: 5s
+  #     retries: 3
+  #   restart: unless-stopped
+  #   networks:
+  #     - sovani_network
+  #   deploy:
+  #     replicas: 0
 
   # Prometheus для метрик
   prometheus:

@@ -38,7 +38,7 @@ RUN mkdir -p /app/logs /app/temp && \
     chown -R sovani:sovani /app
 
 # Переключение на пользователя приложения
-USER sovani
+# USER sovani
 
 # Переменные окружения
 ENV PYTHONPATH=/app

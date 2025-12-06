@@ -15,10 +15,23 @@ import json
 import time
 from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+# Загружаем переменные окружения из .env файла
+load_dotenv()
+
+# Настройка uvloop для повышения производительности
+try:
+    import uvloop
+    uvloop.install()
+    print("uvloop installed for enhanced performance")
+except ImportError:
+    print("uvloop not available, using default asyncio loop")
 
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
+import hmac
 import uvicorn
 from pydantic import BaseModel
 
@@ -32,6 +45,14 @@ from dialog.flow_manager import get_flow_manager
 from adapters.crm_adapter import get_crm_adapter
 
 logger = get_logger(__name__)
+
+# Безопасный импорт middleware с fallback
+setup_middlewares = None
+try:
+    from .middleware.ratelimit import setup_middlewares
+    logger.info("ratelimit_middleware_imported_successfully")
+except Exception as e:
+    logger.warning("ratelimit_middleware_unavailable", error=str(e))
 
 
 class TelegramUpdate(BaseModel):
@@ -340,6 +361,16 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Настройка rate limiting middleware (если доступна)
+if setup_middlewares is not None:
+    try:
+        setup_middlewares(app, redis_url=os.getenv("REDIS_URL"))
+        logger.info("ratelimit_middleware_setup_complete")
+    except Exception as e:
+        logger.warning("ratelimit_middleware_setup_failed", error=str(e))
+else:
+    logger.warning("ratelimit_disabled_fallback")
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -353,6 +384,12 @@ app.add_middleware(
 @app.get("/healthz")
 async def health_check():
     """Health check эндпоинт"""
+    return {"status": "healthy", "service": "telegram-webhook"}
+    
+
+@app.get("/health")
+async def health_check_alias():
+    """Алиас для /healthz для совместимости"""
     return {"status": "healthy", "service": "telegram-webhook"}
     
     
@@ -384,6 +421,32 @@ async def readiness_check():
         )
 
 
+async def handle_update(request: Request) -> Dict[str, Any]:
+    """
+    Общая логика обработки Telegram update
+    """
+    # Получение raw body для валидации
+    body = await request.body()
+    
+    # Парсинг JSON
+    try:
+        update_data = json.loads(body.decode('utf-8'))
+    except json.JSONDecodeError as e:
+        logger.warning(f"Invalid JSON in webhook request: {e}")
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+        
+    # Валидация структуры update
+    try:
+        update = TelegramUpdate(**update_data)
+    except Exception as e:
+        logger.warning(f"Invalid Telegram update structure: {e}")
+        raise HTTPException(status_code=400, detail="Invalid update structure")
+        
+    # Обработка update
+    response = await _webhook_processor.process_update(update)
+    
+    return response
+
 @app.post(f"/telegram/{os.getenv('WEBHOOK_SECRET_PATH', 'SECRET')}")
 async def telegram_webhook(request: Request):
     """
@@ -392,27 +455,68 @@ async def telegram_webhook(request: Request):
     Path содержит секретный токен для безопасности
     """
     try:
-        # Получение raw body для валидации
-        body = await request.body()
+        return await handle_update(request)
         
-        # Парсинг JSON
-        try:
-            update_data = json.loads(body.decode('utf-8'))
-        except json.JSONDecodeError as e:
-            logger.warning(f"Invalid JSON in webhook request: {e}")
-            raise HTTPException(status_code=400, detail="Invalid JSON")
-            
-        # Валидация структуры update
-        try:
-            update = TelegramUpdate(**update_data)
-        except Exception as e:
-            logger.warning(f"Invalid Telegram update structure: {e}")
-            raise HTTPException(status_code=400, detail="Invalid update structure")
-            
-        # Обработка update
-        response = await _webhook_processor.process_update(update)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Webhook processing error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# ПРОДАКШЕН: Стандартный маршрут с проверкой заголовка X-Telegram-Bot-Api-Secret-Token
+@app.post("/telegram/webhook")
+async def telegram_webhook_standard(request: Request):
+    """
+    Стандартный Telegram webhook с проверкой X-Telegram-Bot-Api-Secret-Token
+    
+    Проверяет заголовок X-Telegram-Bot-Api-Secret-Token на точное совпадение
+    с TELEGRAM_WEBHOOK_SECRET из переменных окружения.
+    """
+    # Получение секретного токена из заголовка
+    received_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+    expected_token = os.getenv("TELEGRAM_WEBHOOK_SECRET")
+    
+    # Проверка наличия обоих токенов
+    if not expected_token:
+        logger.error("TELEGRAM_WEBHOOK_SECRET not configured")
+        return Response(status_code=404)
+    
+    if not received_token:
+        logger.warning("Missing X-Telegram-Bot-Api-Secret-Token header")
+        return Response(status_code=404)
+    
+    # Безопасное сравнение токенов
+    if not hmac.compare_digest(received_token, expected_token):
+        logger.warning("Invalid X-Telegram-Bot-Api-Secret-Token", 
+                      received_length=len(received_token),
+                      expected_length=len(expected_token))
+        return Response(status_code=404)
+    
+    try:
+        return await handle_update(request)
         
-        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Webhook processing error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# HOTFIX: Алиасный маршрут с HMAC проверкой секрета
+@app.post("/telegram/{secret}")
+async def telegram_secret_webhook(secret: str, request: Request):
+    """
+    Алиасный Telegram webhook с динамической проверкой секрета
+    
+    HOTFIX: Для совместимости с различными настройками webhook
+    """
+    # Проверка секрета через HMAC
+    webhook_secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+    if webhook_secret and not hmac.compare_digest(secret, webhook_secret):
+        return Response(status_code=404)
+    
+    try:
+        return await handle_update(request)
         
     except HTTPException:
         raise
@@ -472,14 +576,38 @@ async def internal_error_handler(request: Request, exc):
 
 
 if __name__ == "__main__":
-    # Запуск для разработки
+    # Запуск для разработки/продакшена с оптимизациями
     port = int(os.getenv('WEBHOOK_PORT', '8000'))
     host = os.getenv('WEBHOOK_HOST', '0.0.0.0')
+    workers = int(os.getenv('UVICORN_WORKERS', '1'))
     
-    uvicorn.run(
-        "webhook:app",
-        host=host,
-        port=port,
-        reload=os.getenv('APP_ENV', 'production') != 'production',
-        log_config=None  # Используем наш логгер
-    )
+    # Оптимизация для продакшена
+    use_uvloop = os.getenv('USE_UVLOOP', 'true').lower() == 'true'
+    
+    uvicorn_config = {
+        "host": host,
+        "port": port,
+        "workers": workers,
+        "log_config": None,  # Используем наш логгер
+        "access_log": False,  # Отключаем access логи для производительности
+        "reload": os.getenv('APP_ENV', 'production') != 'production'
+    }
+    
+    # Дополнительные оптимизации для продакшена
+    if os.getenv('APP_ENV', 'production') == 'production':
+        uvicorn_config.update({
+            "loop": "uvloop" if use_uvloop else "asyncio",
+            "http": "httptools",
+            "lifespan": "on",
+            "timeout_keep_alive": 30,
+            "timeout_notify": 30,
+            "limit_max_requests": 10000,
+            "limit_concurrency": 1000
+        })
+        
+        logger.info(f"Starting production server: host={host}, port={port}, workers={workers}")
+        logger.info(f"Performance optimizations: loop=uvloop, http=httptools")
+    else:
+        logger.info(f"Starting development server: host={host}, port={port}")
+    
+    uvicorn.run("webhook:app", **uvicorn_config)

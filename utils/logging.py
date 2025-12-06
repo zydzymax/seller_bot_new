@@ -19,6 +19,7 @@ from pathlib import Path
 
 import structlog
 from structlog.contextvars import clear_contextvars, bind_contextvars
+import orjson
 
 
 class PIIFilter:
@@ -103,14 +104,29 @@ class JSONFormatter(logging.Formatter):
                 "traceback": self.formatException(record.exc_info)
             }
             
-        return json.dumps(log_data, ensure_ascii=False, default=str)
+        # Используем orjson для быстрой сериализации
+        return orjson.dumps(
+            log_data, 
+            option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY
+        ).decode('utf-8')
+
+
+class PerformanceLogFilter(logging.Filter):
+    """Фильтр для метрик производительности"""
+    
+    def filter(self, record):
+        # Помечаем performance метрики
+        if hasattr(record, 'duration_ms') or 'processing_time' in record.getMessage().lower():
+            record.category = 'performance'
+        return True
 
 
 def configure_logging(
     level: str = None,
     log_file: Optional[str] = None,
     enable_console: bool = True,
-    json_format: bool = True
+    json_format: bool = True,
+    enable_performance_logging: bool = True
 ):
     """
     Конфигурация системы логирования
@@ -171,8 +187,6 @@ def configure_logging(
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.add_logger_name,
-            structlog.processors.add_log_level,
             structlog.processors.StackInfoRenderer(),
             structlog.dev.set_exc_info,
             structlog.processors.JSONRenderer() if json_format else structlog.dev.ConsoleRenderer(),
@@ -195,6 +209,25 @@ def get_logger(name: str) -> structlog.BoundLogger:
     """
     return structlog.get_logger(name)
 
+
+def log_performance(operation: str, duration_ms: int, **extra_data):
+    """
+    Логирование метрик производительности
+    
+    Args:
+        operation: Название операции
+        duration_ms: Продолжительность в мс
+        **extra_data: Дополнительные метрики
+    """
+    logger = get_logger('performance')
+    logger.info(
+        f"Performance: {operation} completed",
+        operation=operation,
+        duration_ms=duration_ms,
+        category='performance',
+        **extra_data
+    )
+    
 
 def set_context(**kwargs):
     """
@@ -257,6 +290,8 @@ __all__ = [
     'clear_context',
     'with_context',
     'configure_logging',
+    'log_performance',
     'PIIFilter',
-    'JSONFormatter'
+    'JSONFormatter',
+    'PerformanceLogFilter'
 ]

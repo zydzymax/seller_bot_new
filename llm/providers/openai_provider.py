@@ -77,8 +77,14 @@ class OpenAIProvider(LLMProvider):
         # Rate limiting
         if self.rate_limiter:
             await self.rate_limiter.check(request)
-        # Используем GPT-5 как требовалось
-        model_name = "gpt-5"
+        # Используем choose_runtime_model для выбора модели
+        try:
+            from llm.orchestrator import get_orchestrator
+            orchestrator = await get_orchestrator()
+            model_name = await orchestrator.choose_runtime_model(request.model)
+        except (ImportError, Exception) as e:
+            model_name = "gpt-4o"  # Безопасный fallback
+            logger.warning(f"Error choosing model: {e}. Using fallback: {model_name}")
         
         payload = {
             "model": model_name,

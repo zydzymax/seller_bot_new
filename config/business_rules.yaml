@@ -1,5 +1,6 @@
 moq:
   turnkey_per_color: 1000
+  client_materials_per_color: 300
 scheduling:
   promise_exact_dates: false
   allow_partial_shipments: true

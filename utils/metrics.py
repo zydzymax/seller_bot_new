@@ -19,7 +19,11 @@ from enum import Enum
 import psutil
 
 import redis.asyncio as redis
-from utils.logging import get_logger
+from prometheus_client import (
+    Counter, Gauge, Histogram, CollectorRegistry, 
+    generate_latest, CONTENT_TYPE_LATEST
+)
+from utils.logging import get_logger, log_performance
 
 logger = get_logger(__name__)
 
@@ -54,17 +58,149 @@ class HealthCheck:
     response_time_ms: Optional[float] = None
 
 
-class MetricsCollector:
-    """Сборщик метрик для SoVAni AI seller"""
+class PrometheusMetricsCollector:
+    """Prometheus-совместимый сборщик метрик для SoVAni AI seller"""
     
-    def __init__(self, redis_url: str = None):
+    def __init__(self, redis_url: str = None, registry: Optional[CollectorRegistry] = None):
         self.redis_client = redis.from_url(redis_url or os.getenv('REDIS_ADDR', 'redis://localhost:6379/0'))
-        self.metrics: Dict[str, Metric] = {}
         self.app_start_time = time.time()
         self.namespace = "sovani_ai_seller"
         
-        # Инициализация базовых метрик
-        self._init_base_metrics()
+        # Prometheus registry
+        self.registry = registry or CollectorRegistry()
+        
+        # Инициализация Prometheus метрик
+        self._init_prometheus_metrics()
+        
+        # Кэш для системных метрик (обновляем не чаще раза в 30 секунд)
+        self._last_system_update = 0
+        
+    def _init_prometheus_metrics(self):
+        """Инициализация Prometheus метрик"""
+        # System метрики
+        self.system_cpu_usage = Gauge(
+            'system_cpu_usage_percent', 
+            'System CPU usage percentage',
+            registry=self.registry
+        )
+        
+        self.system_memory_usage = Gauge(
+            'system_memory_usage_bytes', 
+            'System memory usage in bytes',
+            registry=self.registry
+        )
+        
+        self.system_memory_usage_percent = Gauge(
+            'system_memory_usage_percent', 
+            'System memory usage percentage',
+            registry=self.registry
+        )
+        
+        # Application метрики
+        self.telegram_updates_total = Counter(
+            'telegram_updates_total',
+            'Total Telegram updates processed',
+            registry=self.registry
+        )
+        
+        self.telegram_updates_errors = Counter(
+            'telegram_updates_errors_total',
+            'Total Telegram update processing errors',
+            registry=self.registry
+        )
+        
+        self.telegram_updates_duration = Histogram(
+            'telegram_updates_duration_seconds',
+            'Telegram update processing duration',
+            registry=self.registry
+        )
+        
+        # LLM метрики
+        self.llm_requests_total = Counter(
+            'llm_requests_total',
+            'Total LLM API requests',
+            ['provider', 'model', 'status'],
+            registry=self.registry
+        )
+        
+        self.llm_request_duration = Histogram(
+            'llm_request_duration_seconds',
+            'LLM request duration in seconds',
+            ['provider', 'model'],
+            registry=self.registry
+        )
+        
+        self.llm_tokens_total = Counter(
+            'llm_tokens_total',
+            'Total LLM tokens used',
+            ['provider', 'model', 'type'],  # type: input/output/total
+            registry=self.registry
+        )
+        
+        self.llm_cost_total = Counter(
+            'llm_cost_total_rub',
+            'Total LLM cost in RUB',
+            ['provider', 'model'],
+            registry=self.registry
+        )
+        
+        # Rate limiting метрики
+        self.rate_limit_checks_total = Counter(
+            'rate_limit_checks_total',
+            'Total rate limit checks',
+            ['key_type', 'result'],  # result: allowed/denied
+            registry=self.registry
+        )
+        
+        # Circuit breaker метрики
+        self.circuit_breaker_state = Gauge(
+            'circuit_breaker_state',
+            'Circuit breaker state (0=closed, 1=open, 2=half_open)',
+            ['model'],
+            registry=self.registry
+        )
+        
+        self.circuit_breaker_failures = Counter(
+            'circuit_breaker_failures_total',
+            'Circuit breaker failure count',
+            ['model'],
+            registry=self.registry
+        )
+        
+        # Idempotency метрики
+        self.idempotency_duplicates_total = Counter(
+            'idempotency_duplicates_total',
+            'Total duplicate requests detected',
+            registry=self.registry
+        )
+        
+        # FSM метрики
+        self.fsm_state_transitions_total = Counter(
+            'fsm_state_transitions_total',
+            'FSM state transitions count',
+            ['from_state', 'to_state'],
+            registry=self.registry
+        )
+        
+        self.fsm_current_sessions = Gauge(
+            'fsm_current_sessions',
+            'Current active FSM sessions',
+            registry=self.registry
+        )
+        
+        # CRM метрики
+        self.crm_operations_total = Counter(
+            'crm_operations_total',
+            'Total CRM operations',
+            ['operation', 'status'],
+            registry=self.registry
+        )
+        
+        self.crm_dlq_size = Gauge(
+            'crm_dlq_size',
+            'CRM DLQ size',
+            registry=self.registry
+        )
         
     def _init_base_metrics(self):
         """Инициализация базовых метрик системы"""
@@ -114,82 +250,95 @@ class MetricsCollector:
                 description=description
             )
             
-    def increment_counter(
-        self, 
-        metric_name: str, 
-        value: float = 1.0, 
-        labels: Optional[Dict[str, str]] = None
-    ):
-        """Увеличение счетчика"""
-        full_name = f"{self.namespace}_{metric_name}"
-        if full_name in self.metrics:
-            self.metrics[full_name].value += value
-            if labels:
-                self.metrics[full_name].labels.update(labels)
-            self.metrics[full_name].timestamp = time.time()
-            
-        logger.debug(f"Counter {metric_name} incremented by {value}", labels=labels)
+    def increment_counter(self, metric_name: str, labels: Dict[str, str] = None, value: float = 1):
+        """Увеличение счетчика с поддержкой Prometheus метрик"""
+        try:
+            metric = getattr(self, metric_name, None)
+            if metric and hasattr(metric, 'labels'):
+                if labels:
+                    metric.labels(**labels).inc(value)
+                else:
+                    metric.inc(value)
+            elif metric and hasattr(metric, 'inc'):
+                metric.inc(value)
+            else:
+                logger.warning(f"Counter {metric_name} not found")
+                
+            # Логирование performance метрики
+            if 'duration' in metric_name or 'processing_time' in metric_name:
+                log_performance(f"counter_{metric_name}", int(value * 1000), labels=labels or {})
+                
+        except Exception as e:
+            logger.error(f"Error incrementing counter {metric_name}: {e}")
         
-    def set_gauge(
-        self, 
-        metric_name: str, 
-        value: float, 
-        labels: Optional[Dict[str, str]] = None
-    ):
-        """Установка значения gauge метрики"""
-        full_name = f"{self.namespace}_{metric_name}"
-        if full_name in self.metrics:
-            self.metrics[full_name].value = value
-            if labels:
-                self.metrics[full_name].labels.update(labels)
-            self.metrics[full_name].timestamp = time.time()
-            
-        logger.debug(f"Gauge {metric_name} set to {value}", labels=labels)
+    def set_gauge(self, metric_name: str, value: float, labels: Dict[str, str] = None):
+        """Установка значения gauge с поддержкой Prometheus"""
+        try:
+            metric = getattr(self, metric_name, None)
+            if metric and hasattr(metric, 'labels'):
+                if labels:
+                    metric.labels(**labels).set(value)
+                else:
+                    metric.set(value)
+            elif metric and hasattr(metric, 'set'):
+                metric.set(value)
+            else:
+                logger.warning(f"Gauge {metric_name} not found")
+                
+        except Exception as e:
+            logger.error(f"Error setting gauge {metric_name}: {e}")
         
-    def record_duration(
-        self, 
-        metric_name: str, 
-        duration_seconds: float,
-        labels: Optional[Dict[str, str]] = None
-    ):
-        """Запись времени выполнения для histogram метрики"""
-        full_name = f"{self.namespace}_{metric_name}"
-        if full_name in self.metrics:
-            # Для простоты сохраняем последнее значение
-            # В реальной реализации здесь был бы histogram с bucket'ами
-            self.metrics[full_name].value = duration_seconds
-            if labels:
-                self.metrics[full_name].labels.update(labels)
-            self.metrics[full_name].timestamp = time.time()
+    def observe_histogram(self, metric_name: str, value: float, labels: Dict[str, str] = None):
+        """Добавление наблюдения в histogram"""
+        try:
+            metric = getattr(self, metric_name, None)
+            if metric and hasattr(metric, 'labels'):
+                if labels:
+                    metric.labels(**labels).observe(value)
+                else:
+                    metric.observe(value)
+            elif metric and hasattr(metric, 'observe'):
+                metric.observe(value)
+            else:
+                logger.warning(f"Histogram {metric_name} not found")
+                
+            # Логирование performance метрики
+            log_performance(f"histogram_{metric_name}", int(value * 1000), labels=labels or {})
             
-        # Также увеличиваем общий счетчик операций
-        base_name = metric_name.replace('_duration_seconds', '_total')
-        self.increment_counter(base_name, labels=labels)
-        
-        logger.debug(f"Duration {metric_name} recorded: {duration_seconds:.3f}s", labels=labels)
+        except Exception as e:
+            logger.error(f"Error observing histogram {metric_name}: {e}")
         
     async def collect_system_metrics(self):
-        """Сбор системных метрик"""
-        try:
-            # Использование памяти
-            memory_info = psutil.virtual_memory()
-            self.set_gauge("system_memory_usage_bytes", memory_info.used)
+        """Сбор системных метрик с кэшированием"""
+        now = time.time()
+        
+        if now - self._last_system_update < 30:  # 30 секунд кэш
+            return
             
-            # Использование CPU
+        try:
+            # CPU
             cpu_percent = psutil.cpu_percent(interval=0.1)
-            self.set_gauge("system_cpu_usage_percent", cpu_percent)
+            self.set_gauge('system_cpu_usage_percent', cpu_percent)
+            
+            # Memory
+            memory = psutil.virtual_memory()
+            self.set_gauge('system_memory_usage_bytes', memory.used)
+            self.set_gauge('system_memory_usage_percent', memory.percent)
             
             # Uptime приложения
-            uptime = time.time() - self.app_start_time
-            self.set_gauge("app_uptime_seconds", uptime)
+            uptime = now - self.app_start_time
+            self.set_gauge('app_uptime_seconds', uptime)
             
-            # Статус Redis
-            try:
-                await self.redis_client.ping()
-                self.set_gauge("redis_connected", 1)
-            except:
-                self.set_gauge("redis_connected", 0)
-                
+            self._last_system_update = now
+            
+            # Логирование системных метрик как performance
+            log_performance(
+                "system_metrics_collected", 
+                int((time.time() - now) * 1000),
+                cpu_percent=cpu_percent,
+                memory_percent=memory.percent
+            )
+            
         except Exception as e:
             logger.error(f"Error collecting system metrics: {e}")
             
@@ -221,48 +370,59 @@ class MetricsCollector:
         
     def format_prometheus_metrics(self) -> str:
         """Форматирование метрик в формате Prometheus"""
-        lines = []
-        
-        for metric in self.metrics.values():
-            # HELP строка
-            lines.append(f"# HELP {metric.name} {metric.description}")
-            # TYPE строка
-            lines.append(f"# TYPE {metric.name} {metric.type.value}")
-            
-            # Значение метрики с лейблами
-            if metric.labels:
-                label_pairs = [f'{k}="{v}"' for k, v in metric.labels.items()]
-                label_str = "{" + ",".join(label_pairs) + "}"
-            else:
-                label_str = ""
-                
-            lines.append(f"{metric.name}{label_str} {metric.value}")
-            lines.append("")  # Пустая строка между метриками
-            
-        return "\n".join(lines)
+        return generate_latest(self.registry)
         
     def get_metrics_json(self) -> Dict[str, Any]:
-        """Получение метрик в JSON формате"""
-        return {
-            "timestamp": time.time(),
-            "namespace": self.namespace,
-            "metrics": {
-                name: {
-                    "value": metric.value,
-                    "type": metric.type.value,
-                    "description": metric.description,
-                    "labels": metric.labels,
-                    "timestamp": metric.timestamp
-                }
-                for name, metric in self.metrics.items()
+        """Получение метрик в JSON формате для дашборда"""
+        try:
+            text_metrics = self.format_prometheus_metrics()
+            
+            # Парсим основные метрики для JSON ответа
+            metrics_data = {
+                "timestamp": time.time(),
+                "namespace": self.namespace,
+                "system": {},
+                "application": {},
+                "llm": {}
             }
-        }
+            
+            # Простой парсинг Prometheus формата
+            for line in text_metrics.split('\n'):
+                if line and not line.startswith('#'):
+                    try:
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            metric_name = parts[0]
+                            value = float(parts[1])
+                            
+                            if 'system_' in metric_name:
+                                metrics_data["system"][metric_name] = value
+                            elif any(prefix in metric_name for prefix in ['telegram_', 'fsm_', 'crm_']):
+                                metrics_data["application"][metric_name] = value
+                            elif 'llm_' in metric_name:
+                                metrics_data["llm"][metric_name] = value
+                                
+                    except (ValueError, IndexError):
+                        continue
+                        
+            return metrics_data
+            
+        except Exception as e:
+            logger.error(f"Error generating JSON metrics: {e}")
+            return {
+                "error": str(e),
+                "timestamp": time.time()
+            }
+
+
+# Создаем alias для совместимости с существующим кодом
+MetricsCollector = PrometheusMetricsCollector
 
 
 class HealthChecker:
     """Проверщик состояния системы и компонентов"""
     
-    def __init__(self, metrics_collector: MetricsCollector):
+    def __init__(self, metrics_collector: PrometheusMetricsCollector):
         self.metrics_collector = metrics_collector
         self.components_to_check = [
             "redis",
@@ -429,12 +589,12 @@ _metrics_collector = None
 _health_checker = None
 
 
-async def get_metrics_collector(redis_url: str = None) -> MetricsCollector:
+async def get_metrics_collector(redis_url: str = None) -> PrometheusMetricsCollector:
     """Получение singleton экземпляра сборщика метрик"""
     global _metrics_collector
     
     if _metrics_collector is None:
-        _metrics_collector = MetricsCollector(redis_url)
+        _metrics_collector = PrometheusMetricsCollector(redis_url)
         
     return _metrics_collector
 
@@ -452,27 +612,67 @@ async def get_health_checker() -> HealthChecker:
 
 # Декораторы для автоматического учета метрик
 def track_duration(metric_name: str, labels: Optional[Dict[str, str]] = None):
-    """Декоратор для отслеживания времени выполнения функции"""
+    """Декоратор для трекинга времени выполнения функции с Prometheus histogram"""
     def decorator(func):
-        async def wrapper(*args, **kwargs):
-            collector = await get_metrics_collector()
+        async def async_wrapper(*args, **kwargs):
             start_time = time.time()
-            
             try:
                 result = await func(*args, **kwargs)
                 duration = time.time() - start_time
-                collector.record_duration(metric_name, duration, labels)
+                
+                collector = await get_metrics_collector()
+                collector.observe_histogram(metric_name, duration, labels)
+                
                 return result
             except Exception as e:
                 duration = time.time() - start_time
-                collector.record_duration(metric_name, duration, labels)
+                # Трекинг и ошибочных запросов
+                collector = await get_metrics_collector()
+                error_labels = dict(labels) if labels else {}
+                error_labels['status'] = 'error'
+                collector.observe_histogram(metric_name, duration, error_labels)
+                raise e
                 
-                # Увеличиваем счетчик ошибок
-                error_metric = metric_name.replace('_duration_seconds', '_errors_total')
-                collector.increment_counter(error_metric, labels=labels)
-                raise
+        def sync_wrapper(*args, **kwargs):
+            start_time = time.time()
+            try:
+                result = func(*args, **kwargs)
+                duration = time.time() - start_time
                 
-        return wrapper
+                # Для синхронных функций - используем asyncio.create_task если есть loop
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        async def update_metrics():
+                            collector = await get_metrics_collector()
+                            collector.observe_histogram(metric_name, duration, labels)
+                        asyncio.create_task(update_metrics())
+                except RuntimeError:
+                    pass  # Нет активного loop
+                    
+                return result
+            except Exception as e:
+                duration = time.time() - start_time
+                # Аналогично для ошибок
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        async def update_error_metrics():
+                            collector = await get_metrics_collector()
+                            error_labels = dict(labels) if labels else {}
+                            error_labels['status'] = 'error'
+                            collector.observe_histogram(metric_name, duration, error_labels)
+                        asyncio.create_task(update_error_metrics())
+                except RuntimeError:
+                    pass
+                raise e
+                
+        # Возвращаем правильный wrapper в зависимости от типа функции
+        if asyncio.iscoroutinefunction(func):
+            return async_wrapper
+        else:
+            return sync_wrapper
+            
     return decorator
 
 
@@ -496,7 +696,8 @@ def count_calls(metric_name: str, labels: Optional[Dict[str, str]] = None):
 
 
 __all__ = [
-    'MetricsCollector',
+    'PrometheusMetricsCollector',
+    'MetricsCollector',  # Alias for compatibility
     'HealthChecker',
     'HealthCheck',
     'MetricType',

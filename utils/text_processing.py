@@ -1,71 +1,48 @@
-# ~/ai_seller/project/python-core/utils/text_processing.py
-
-"""
-Утилиты для предобработки и нормализации текста.
-Используются в анализе, валидации и генерации.
-"""
-
 import re
-import html
-from typing import List
 
+NBSP = "\u00A0"
+# числа, разделители, плавающая часть (для 3,5k), суффиксы k/к/тыс/pcs/шт
+QTY_FULL_RE = re.compile(
+    r'(?<!\d)\s*([~≈]?\s*\d+(?:[.,]\d+)?(?:[ '+NBSP+']\d{3})*|\d+(?:[ \.,'+NBSP+']\d{3})*)\s*(к|k|тыс\.?|тыс|тыщи)?\s*(шт|pcs)?',
+    re.IGNORECASE
+)
 
-def clean_text(text: str) -> str:
+def parse_quantity(text: str) -> int | None:
     """
-    Удаляет HTML-теги, спецсимволы, эмодзи и лишние пробелы.
-
-    :param text: Исходный текст
-    :return: Очищенный текст
+    Понимает: 4000; 4 000; 5,000; ≈5000; ~3 200; 3,5k; 4k; 4к; 4 тыс; 4000 шт; 5000pcs.
+    'k/к/тыс' → *1000, с учётом десятичной части (3,5k → 3500).
+    Отсекает неадекватные величины > 50 млн.
     """
-    if not text:
-        return ""
-
-    text = html.unescape(text)
-    text = re.sub(r"<[^>]+>", "", text)  # HTML
-    text = re.sub(r"[^\w\s,.!?@():\"'-]", "", text)  # Эмодзи и мусор
-    text = re.sub(r"\s+", " ", text)  # Много пробелов
-    return text.strip()
-
-
-def normalize_text(text: str) -> str:
-    """
-    Приводит текст к нижнему регистру и удаляет мусор.
-
-    :param text: Исходный текст
-    :return: Нормализованный текст
-    """
-    return clean_text(text).lower()
-
-
-def extract_keywords(text: str, min_length: int = 4) -> List[str]:
-    """
-    Наивное извлечение ключевых слов по длине.
-
-    :param text: Входной текст
-    :param min_length: Минимальная длина слова
-    :return: Список ключевых слов
-    """
-    words = normalize_text(text).split()
-    return [word for word in words if len(word) >= min_length]
-
-
-def has_question(text: str) -> bool:
-    """
-    Проверка, содержит ли текст вопрос.
-
-    :param text: Исходный текст
-    :return: True, если найден вопрос
-    """
-    return "?" in text or any(word in text.lower() for word in ["что", 
-"как", "когда", "где", "почему", "зачем"])
-
-
-# Пример локального использования
-if __name__ == "__main__":
-    raw = "   <b>Здравствуйте!</b> 😃 Меня интересует костюм. Что по 
-срокам?"
-    print("Исходный:", raw)
-    print("Очищенный:", clean_text(raw))
-    print("Ключевые слова:", extract_keywords(raw))
-    print("Это вопрос?", has_question(raw))
-
+    if not text: return None
+    
+    # Найти все совпадения и выбрать лучший вариант
+    matches = list(QTY_FULL_RE.finditer(text))
+    if not matches: return None
+    
+    # Приоритет: числа с суффиксами k/к/тыс, потом большие числа (>100), потом любые
+    best_match = None
+    best_priority = -1
+    
+    for match in matches:
+        num_raw, suf, _ = match.groups()
+        clean = re.sub(r'[~≈\s'+NBSP+r']', '', num_raw).replace(',', '.')
+        try:
+            val = float(clean)
+        except ValueError:
+            continue
+            
+        priority = 0
+        if suf and re.match(r'^(к|k|тыс)', suf, re.I):
+            priority = 3  # Highest priority for k/к/тыс
+            val *= 1000.0
+        elif val >= 1000:
+            priority = 2  # High priority for large numbers
+        elif val >= 10:
+            priority = 1  # Medium priority for medium numbers
+        
+        iv = int(round(val))
+        if 1 <= iv <= 50_000_000 and priority > best_priority:
+            best_match = iv
+            best_priority = priority
+    
+    return best_match
