@@ -1,0 +1,53 @@
+# AI Seller Self - Продажа AI-ботов для бизнеса
+# Бот продает внедрение таких же AI-ботов в любую нишу
+
+domain: ai_seller_self
+version: 1.0.0
+language: ru
+active: true
+
+description: >
+  AI-бот, который продает услуги внедрения AI-ботов для автоматизации продаж
+  в любой нише. Квалифицирует лиды, диагностирует потребности, демонстрирует
+  возможности и закрывает на сделку.
+
+# Целевая аудитория
+target_audience:
+  - Владельцы малого и среднего бизнеса
+  - Руководители отделов продаж
+  - Маркетологи и Growth-специалисты
+  - Агентства и интеграторы
+
+# Средний чек
+average_deal:
+  min: 50000      # ₽
+  avg: 150000     # ₽
+  max: 500000     # ₽
+
+# Sales cycle
+sales_cycle:
+  min_touchpoints: 3
+  avg_duration_days: 7
+  max_duration_days: 30
+
+# Lead scoring
+lead_qualification:
+  required_fields:
+    - business_niche
+    - current_lead_volume
+    - pain_point
+    - decision_authority
+    - budget_range
+
+  disqualifiers:
+    - no_budget
+    - no_authority
+    - not_b2b
+    - too_small_volume  # <10 заявок/месяц
+
+# Success metrics
+kpis:
+  target_conversion: 0.25      # 25% от квалифицированных лидов
+  avg_response_time_sec: 30
+  max_messages_to_qualify: 10
+  target_demo_rate: 0.60       # 60% доходят до демо

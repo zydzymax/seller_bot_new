@@ -1,0 +1,267 @@
+# Business Rules - AI Seller Self
+
+# Квалификация лидов
+qualification:
+  min_lead_volume: 10              # Минимум заявок/месяц
+  max_lead_volume: 100000          # Максимум заявок/месяц
+
+  # Подходящие ниши
+  suitable_niches:
+    - real_estate
+    - auto_service
+    - b2b_saas
+    - manufacturing
+    - ecommerce
+    - education
+    - healthcare
+    - professional_services
+    - home_services
+
+  # Неподходящие ниши (автоотказ)
+  inappropriate_niches:
+    - gambling
+    - crypto
+    - adult
+    - mlm
+
+  # Требования к ЛПР
+  required_authority_levels:
+    - owner
+    - decision_maker
+    - influencer  # С оговоркой
+
+# Ценообразование
+pricing:
+  currency: RUB
+
+  tiers:
+    basic:
+      price: 50000
+      min_lead_volume: 10
+      max_lead_volume: 50
+      features:
+        - qualification_24_7
+        - contact_collection
+        - telegram_integration
+        - basic_analytics
+
+    standard:
+      price: 150000
+      min_lead_volume: 50
+      max_lead_volume: 200
+      features:
+        - all_from_basic
+        - crm_integration
+        - objection_handling
+        - ab_testing
+        - detailed_analytics
+
+    premium:
+      price: 300000
+      min_lead_volume: 200
+      max_lead_volume: 100000
+      features:
+        - all_from_standard
+        - multi_channel
+        - self_learning
+        - personal_manager
+        - custom_niche_adaptation
+
+  # Скидки и акции
+  discounts:
+    annual_payment: 0.15           # 15% скидка при годовой оплате
+    referral: 0.10                 # 10% за рекомендацию
+    early_adopter: 0.20            # 20% для первых 10 клиентов (если есть)
+
+# Диалог
+conversation:
+  # Приветствие
+  greet_once_per_day: true
+  greeting_style: friendly_professional
+
+  # Вопросы
+  ask_one_question_at_time: true
+  max_questions_in_row: 3          # Максимум 3 вопроса подряд без паузы
+
+  # Длина сообщений
+  max_message_length: 500          # символов
+  preferred_message_length: 200    # символов
+
+  # Темп диалога
+  max_messages_to_qualify: 10      # Квалифицировать за 10 сообщений
+  max_messages_to_demo: 20         # Дойти до демо за 20 сообщений
+  max_total_messages: 50           # Всего сообщений в диалоге
+
+  # Работа с паузами
+  client_pause_reminder_minutes: 60  # Напомнить через час если нет ответа
+  max_reminders: 2                   # Максимум 2 напоминания
+
+# Возражения
+objections:
+  # Максимум попыток закрыть возражение
+  max_attempts_per_objection: 2
+
+  # Когда эскалировать к человеку
+  escalate_to_human_if:
+    - repeated_objection_not_closed  # Возражение не закрыто после 2 попыток
+    - complex_technical_question     # Сложный технический вопрос
+    - custom_requirement             # Нестандартное требование
+    - high_value_lead                # Высокобюджетный лид (>300k)
+
+  # Стоп-слова (жесткий отказ)
+  hard_no_phrases:
+    - "не интересно"
+    - "не надо"
+    - "отстаньте"
+    - "не беспокойте"
+    - "удалите меня"
+
+# ROI калькуляция
+roi_calculation:
+  # Формула: (дополнительные заявки × конверсия × средний чек - стоимость бота) / стоимость бота
+  default_conversion_rate: 0.20    # 20%
+  default_average_check: 30000     # ₽
+  bot_coverage_increase: 0.20      # Бот обработает на 20% заявок больше
+
+# Demo
+demo:
+  # Что показывать
+  materials:
+    - conversation_examples
+    - niche_case_studies
+    - roi_calculator
+    - video_demo_url
+
+  # Адаптация демо под нишу
+  show_niche_specific_examples: true
+
+  # Длительность демо
+  max_demo_duration_messages: 5
+
+# Дисквалификация
+disqualification:
+  # Когда автоматически дисквалифицировать
+  auto_disqualify_if:
+    - lead_volume < 10
+    - inappropriate_niche
+    - decision_authority == "user"
+    - no_budget_at_all
+
+  # Сообщение при отказе
+  polite_goodbye: true
+  add_to_nurture_list: true        # Добавить в список для последующей работы
+
+# Follow-up
+follow_up:
+  # Когда делать follow-up
+  after_demo_no_response_hours: 24
+  after_offer_no_response_hours: 48
+  after_objection_no_response_hours: 72
+
+  # Максимум follow-up
+  max_follow_ups: 3
+
+# CRM Integration
+crm:
+  # Когда создавать лид в CRM
+  create_lead_at_stage: CLOSE
+
+  # Поля для передачи
+  required_fields:
+    - contact_name
+    - contact_phone
+    - business_niche
+    - current_lead_volume
+    - pain_point
+
+  optional_fields:
+    - contact_email
+    - company_name
+    - budget_range
+    - timeline
+    - lead_channels
+
+  # Теги
+  auto_tags:
+    - source: ai_seller_bot
+    - domain: ai_seller_self
+
+# Guardrails (Защита от плохого поведения бота)
+guardrails:
+  # Запрещенные фразы
+  forbidden_phrases:
+    - "только сегодня"
+    - "акция заканчивается"
+    - "уникальное предложение"
+    - "последний шанс"
+    - "гарантируем 100%"
+    - "удвоим продажи"
+
+  # Проверка на честность
+  verify_claims: true
+
+  # Если бот не знает ответ
+  admit_uncertainty: true
+  offer_human_escalation: true
+
+  # Tone control
+  max_emoji_per_message: 2
+  avoid_caps_lock: true
+  professional_language: true
+
+# A/B Testing
+ab_testing:
+  enabled: true
+
+  # Что тестируем
+  test_variants:
+    - greeting_style
+    - qualification_order
+    - demo_approach
+    - pricing_presentation
+
+  # Распределение трафика
+  control_group_percent: 50        # 50% контрольная группа
+  experiment_group_percent: 50     # 50% экспериментальная
+
+  # Минимум для статистической значимости
+  min_sample_size: 30
+
+# Аналитика
+analytics:
+  track_events:
+    - conversation_started
+    - lead_qualified
+    - lead_disqualified
+    - demo_shown
+    - offer_presented
+    - objection_raised
+    - objection_resolved
+    - contact_collected
+    - lead_completed
+
+  # Метрики
+  key_metrics:
+    - qualification_rate
+    - demo_reach_rate
+    - offer_reach_rate
+    - close_rate
+    - avg_messages_to_close
+    - avg_conversation_duration
+
+# Обучение бота
+learning:
+  enabled: true
+
+  # Что учитывать
+  learn_from:
+    - successful_conversations
+    - failed_conversations
+    - objection_resolutions
+    - client_segments
+
+  # Как часто обновлять
+  update_frequency_hours: 24
+
+  # Минимум данных для обучения
+  min_conversations_to_learn: 50

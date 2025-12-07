@@ -1,0 +1,240 @@
+# Sales States (этапы продаж) - AI Seller Self
+
+states:
+  # 1. ПРИВЕТСТВИЕ
+  - name: GREETING
+    description: "Первый контакт, приветствие и установление контакта"
+    collect_slots: []
+    goals:
+      - Поприветствовать клиента
+      - Представиться и объяснить чем можем помочь
+      - Вызвать интерес
+    success_criteria:
+      - Клиент ответил
+      - Проявил интерес или задал вопрос
+    transitions:
+      - to: QUALIFY
+        condition: "client_responded and showed_interest"
+      - to: OBJECTIONS
+        condition: "client_skeptical or asked_objection"
+
+  # 2. КВАЛИФИКАЦИЯ
+  - name: QUALIFY
+    description: "Квалификация лида: ниша, объем заявок, каналы"
+    collect_slots:
+      - business_niche
+      - current_lead_volume
+      - lead_channels
+    goals:
+      - Узнать нишу бизнеса
+      - Понять объем заявок
+      - Определить откуда приходят лиды
+    success_criteria:
+      - Собраны обязательные slots
+      - Объем заявок >= 10/месяц
+      - Ниша подходит (B2B или B2C с повторными продажами)
+    disqualify_if:
+      - current_lead_volume < 10
+      - business_niche in ["gambling", "crypto", "adult"]
+    transitions:
+      - to: DISQUALIFIED
+        condition: "lead_volume < 10 or inappropriate_niche"
+      - to: DIAGNOSE
+        condition: "all_qualify_slots_filled and qualified"
+
+  # 3. ДИАГНОСТИКА
+  - name: DIAGNOSE
+    description: "Выявление болей, текущего решения, уровня принятия решений"
+    collect_slots:
+      - pain_point
+      - current_solution
+      - decision_authority
+    goals:
+      - Выявить главную боль клиента
+      - Понять что используют сейчас
+      - Определить ЛПР
+    success_criteria:
+      - Боль четко выявлена
+      - Понятно текущее решение
+      - Клиент - owner или decision_maker
+    disqualify_if:
+      - decision_authority == "user"  # Простой сотрудник не ЛПР
+    transitions:
+      - to: DISQUALIFIED
+        condition: "decision_authority == 'user'"
+      - to: DEMO
+        condition: "all_diagnose_slots_filled and is_decision_maker"
+
+  # 4. ДЕМОНСТРАЦИЯ
+  - name: DEMO
+    description: "Демонстрация возможностей AI-бота под боль клиента"
+    collect_slots: []
+    goals:
+      - Показать как AI-бот решает их боль
+      - Привести кейсы из аналогичной ниши
+      - Продемонстрировать ROI
+    demo_materials:
+      - Примеры диалогов
+      - Кейсы из аналогичных ниш
+      - ROI калькулятор
+      - Видео-демо (если есть)
+    success_criteria:
+      - Клиент понял ценность
+      - Задал уточняющие вопросы
+      - Проявил интерес к стоимости
+    transitions:
+      - to: OFFER
+        condition: "client_interested_in_pricing"
+      - to: OBJECTIONS
+        condition: "client_has_doubts"
+
+  # 5. ПРЕДЛОЖЕНИЕ
+  - name: OFFER
+    description: "Озвучивание предложения и стоимости"
+    collect_slots:
+      - budget_range
+      - timeline
+    goals:
+      - Узнать бюджет клиента
+      - Предложить оптимальный пакет
+      - Обосновать цену через ROI
+    pricing_tiers:
+      - name: "Базовый"
+        price: 50000
+        features:
+          - "Квалификация лидов 24/7"
+          - "Сбор контактов"
+          - "Интеграция с Telegram"
+          - "Базовая аналитика"
+        suitable_for: "< 50 заявок/месяц"
+
+      - name: "Стандарт"
+        price: 150000
+        features:
+          - "Всё из Базового +"
+          - "Интеграция с CRM"
+          - "Обработка возражений"
+          - "A/B тесты сценариев"
+          - "Детальная аналитика"
+        suitable_for: "50-200 заявок/месяц"
+
+      - name: "Премиум"
+        price: 300000
+        features:
+          - "Всё из Стандарт +"
+          - "Мультиканальность (Telegram, WhatsApp, сайт)"
+          - "Самообучение бота"
+          - "Персональный менеджер"
+          - "Кастомизация под нишу"
+        suitable_for: "> 200 заявок/месяц"
+
+    success_criteria:
+      - Бюджет озвучен или понятен диапазон
+      - Клиент согласен с ценностью
+      - Нет price shock
+    transitions:
+      - to: CLOSE
+        condition: "budget_matches and no_objections"
+      - to: OBJECTIONS
+        condition: "price_objection or other_doubts"
+
+  # 6. РАБОТА С ВОЗРАЖЕНИЯМИ
+  - name: OBJECTIONS
+    description: "Обработка возражений и сомнений"
+    collect_slots: []
+    common_objections:
+      - objection: "Дорого"
+        counter: "Давайте посчитаем ROI. Если бот обработает хотя бы 10 дополнительных заявок в месяц, он окупится за X месяцев"
+
+      - objection: "Нужно подумать"
+        counter: "Конечно! Что именно вызывает сомнения? Могу ответить на вопросы прямо сейчас"
+
+      - objection: "У нас уже есть чат-бот"
+        counter: "Отлично! AI-бот отличается тем, что понимает контекст и адаптируется под клиента. Можем интегрировать с вашим текущим решением"
+
+      - objection: "Не уверен что сработает в нашей нише"
+        counter: "Понимаю! У нас есть успешные кейсы в {business_niche}. Могу показать примеры диалогов"
+
+      - objection: "Долго внедрять"
+        counter: "Базовая версия запускается за 7-10 дней. Можем начать с MVP и постепенно улучшать"
+
+      - objection: "Не хватает бюджета сейчас"
+        counter: "Есть вариант старта с минимального пакета за 50к. Или можем обсудить рассрочку"
+
+    goals:
+      - Выявить истинное возражение
+      - Закрыть возражение аргументами
+      - Вернуть в позитивный флоу
+    success_criteria:
+      - Возражение закрыто
+      - Клиент согласен продолжить
+    transitions:
+      - to: DEMO
+        condition: "objection_resolved and needs_more_info"
+      - to: OFFER
+        condition: "objection_resolved and ready_for_offer"
+      - to: CLOSE
+        condition: "objection_resolved and ready_to_buy"
+      - to: DISQUALIFIED
+        condition: "hard_no or not_interested"
+
+  # 7. ЗАКРЫТИЕ
+  - name: CLOSE
+    description: "Сбор контактов и следующие шаги"
+    collect_slots:
+      - contact_name
+      - contact_phone
+      - contact_email
+      - company_name
+    goals:
+      - Получить контакты для связи
+      - Договориться о следующем шаге
+      - Передать в CRM
+    next_steps:
+      - "Созвон с техническим специалистом"
+      - "Подготовка коммерческого предложения"
+      - "Демо на реальных данных"
+      - "Подписание договора"
+    success_criteria:
+      - Контакты собраны
+      - Договорились о next step
+      - Лид передан в CRM
+    transitions:
+      - to: COMPLETED
+        condition: "all_close_slots_filled"
+
+  # 8. ЗАВЕРШЕНО
+  - name: COMPLETED
+    description: "Диалог завершен успешно, лид передан в CRM"
+    collect_slots: []
+    final_actions:
+      - Create CRM lead
+      - Send confirmation message
+      - Notify sales team
+      - Schedule follow-up
+
+  # 9. ДИСКВАЛИФИЦИРОВАН
+  - name: DISQUALIFIED
+    description: "Лид не подходит по критериям"
+    collect_slots: []
+    reasons:
+      - too_small_volume
+      - inappropriate_niche
+      - no_authority
+      - no_budget
+      - not_interested
+    final_actions:
+      - Log disqualification reason
+      - Send polite goodbye
+      - Add to nurture list (if applicable)
+
+# Глобальные переходы (из любого состояния)
+global_transitions:
+  - trigger: "explicit_no or not_interested"
+    to: DISQUALIFIED
+
+  - trigger: "objection_raised"
+    to: OBJECTIONS
+
+  - trigger: "needs_more_info"
+    to: DEMO

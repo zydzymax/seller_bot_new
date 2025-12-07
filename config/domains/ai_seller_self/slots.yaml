@@ -1,0 +1,169 @@
+# Slots (данные для сбора) - AI Seller Self
+
+slots:
+  # === QUALIFY этап ===
+  - name: business_niche
+    type: string
+    required: true
+    stage: QUALIFY
+    description: "Ниша бизнеса клиента"
+    examples:
+      - "недвижимость"
+      - "автосервис"
+      - "B2B SaaS"
+      - "производство"
+      - "e-commerce"
+    extraction:
+      method: llm
+      prompt: "Определи нишу бизнеса клиента из сообщения"
+
+  - name: current_lead_volume
+    type: integer
+    required: true
+    stage: QUALIFY
+    description: "Текущий объем заявок в месяц"
+    validation:
+      min: 1
+      max: 100000
+    extraction:
+      method: llm
+      prompt: "Извлеки количество заявок/обращений клиентов в месяц"
+
+  - name: lead_channels
+    type: string
+    required: false
+    stage: QUALIFY
+    description: "Откуда приходят заявки"
+    examples:
+      - "telegram"
+      - "сайт"
+      - "instagram"
+      - "whatsapp"
+      - "звонки"
+
+  # === DIAGNOSE этап ===
+  - name: pain_point
+    type: enum
+    required: true
+    stage: DIAGNOSE
+    description: "Основная боль клиента"
+    values:
+      - slow_response          # Медленный ответ клиентам
+      - no_night_coverage      # Нет обработки вне рабочего времени
+      - sales_overload         # Продажники перегружены
+      - low_conversion         # Низкая конверсия
+      - no_qualification       # Нет квалификации лидов
+      - manual_work            # Много ручной работы
+    extraction:
+      method: llm
+      prompt: "Определи главную боль: медленный ответ, нет ночной обработки, перегрузка продавцов, низкая конверсия, нет квалификации или ручная работа"
+
+  - name: current_solution
+    type: string
+    required: false
+    stage: DIAGNOSE
+    description: "Что сейчас используют для обработки заявок"
+    examples:
+      - "вручную менеджеры"
+      - "чат-бот без AI"
+      - "CRM система"
+      - "ничего"
+
+  - name: decision_authority
+    type: enum
+    required: true
+    stage: DIAGNOSE
+    description: "Уровень принятия решений"
+    values:
+      - owner               # Владелец бизнеса
+      - decision_maker      # ЛПР (руководитель отдела)
+      - influencer          # Влияет на решение
+      - user                # Просто пользователь
+    extraction:
+      method: llm
+      prompt: "Определи роль: владелец, руководитель отдела, влияет на решение или просто сотрудник"
+
+  # === OFFER этап ===
+  - name: budget_range
+    type: enum
+    required: true
+    stage: OFFER
+    description: "Диапазон бюджета"
+    values:
+      - "< 50k"
+      - "50-150k"
+      - "150-300k"
+      - "> 300k"
+      - "not_disclosed"
+    extraction:
+      method: llm
+      prompt: "Определи бюджет клиента: меньше 50к, 50-150к, 150-300к, больше 300к или не раскрыт"
+
+  - name: timeline
+    type: enum
+    required: false
+    stage: OFFER
+    description: "Сроки внедрения"
+    values:
+      - urgent          # Срочно (1-2 недели)
+      - normal          # Обычно (3-4 недели)
+      - flexible        # Гибко (месяц+)
+
+  # === CLOSE этап ===
+  - name: contact_name
+    type: string
+    required: true
+    stage: CLOSE
+    description: "Имя контакта"
+    extraction:
+      method: llm
+
+  - name: contact_phone
+    type: string
+    required: true
+    stage: CLOSE
+    description: "Телефон"
+    validation:
+      pattern: "^\\+?[0-9]{10,15}$"
+    extraction:
+      method: regex
+      patterns:
+        - "\\+?[0-9]{10,15}"
+
+  - name: contact_email
+    type: string
+    required: false
+    stage: CLOSE
+    description: "Email (опционально)"
+    validation:
+      pattern: "^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$"
+    extraction:
+      method: regex
+
+  - name: company_name
+    type: string
+    required: false
+    stage: CLOSE
+    description: "Название компании"
+
+# Порядок сбора данных
+collection_order:
+  QUALIFY:
+    - business_niche
+    - current_lead_volume
+    - lead_channels
+
+  DIAGNOSE:
+    - pain_point
+    - current_solution
+    - decision_authority
+
+  OFFER:
+    - budget_range
+    - timeline
+
+  CLOSE:
+    - contact_name
+    - contact_phone
+    - contact_email
+    - company_name
