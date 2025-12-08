@@ -292,3 +292,21 @@ ADMIN_COMMAND_HANDLERS = {
     'domain': cmd_domain_info,
     'admin_help': cmd_admin_help
 }
+
+
+def setup_admin_handlers(application):
+    """
+    Регистрация admin command handlers
+
+    Args:
+        application: Telegram Application instance
+    """
+    from telegram.ext import CommandHandler
+
+    # Register all admin commands
+    for command_name, handler_func in ADMIN_COMMAND_HANDLERS.items():
+        application.add_handler(CommandHandler(command_name, handler_func))
+
+    from utils.logging import get_logger
+    logger = get_logger(__name__)
+    logger.info(f"Registered {len(ADMIN_COMMAND_HANDLERS)} admin command handlers")

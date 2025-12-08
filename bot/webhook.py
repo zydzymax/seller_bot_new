@@ -41,7 +41,7 @@ from utils.idempotency import get_idempotency_manager, IdempotencyMiddleware
 from utils.input_sanitizer import get_sanitizer
 from utils.metrics import get_metrics_collector, get_health_checker, track_duration
 from llm.orchestrator import get_orchestrator
-from dialog.flow_manager import get_flow_manager
+from dialog.flow_router import get_flow_manager  # Router to select flow manager by domain
 from adapters.crm_adapter import get_crm_adapter
 
 logger = get_logger(__name__)
