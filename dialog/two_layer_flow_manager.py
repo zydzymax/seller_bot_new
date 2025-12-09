@@ -375,6 +375,23 @@ class TwoLayerFlowManager:
         # Извлекаем бюджет если есть
         self._extract_budget(message, context)
 
+        # --- ВАЖНО: Проверяем контактные данные в любой момент ---
+        # Если клиент присылает контакт (@username, телефон) — закрываем диалог
+        contact = extract_contact(message)
+        if contact or is_contact_info(message):
+            context.client_contact = contact or message.strip()
+            context.conversation_stage = "closed"
+            logger.info(f"Contact detected in ai_seller: {context.client_contact}, stage -> closed")
+
+            # Формируем финальный ответ
+            time_info = ""
+            if context.preferred_period:
+                time_info = f" ({context.preferred_period})"
+            elif context.preferred_time:
+                time_info = f" ({context.preferred_time})"
+
+            return f"Принял контакт, спасибо!\n\nПередам менеджеру, он свяжется{time_info}, чтобы обсудить детали."
+
         # Определяем режим
         mode = self._detect_ai_mode(message, context)
         logger.info(f"AI Seller mode detected: {mode}, price_objection_count={context.price_objection_count}")
@@ -663,6 +680,8 @@ class TwoLayerFlowManager:
         # Обновляем статус
         context.has_main_pitch = True
         context.last_ai_mode = mode
+        context.conversation_stage = "ai_seller"  # Важно: переводим стадию!
+        logger.info("Stage -> ai_seller (after main_pitch)")
 
         return response
 
