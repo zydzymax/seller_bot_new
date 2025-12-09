@@ -35,9 +35,12 @@ logger = get_logger(__name__)
 # Валидируемая карта моделей: OpenAI-only
 MODEL_MAP = {
     "gpt-5": ("openai", "gpt-5"),
+    "gpt-5.1": ("openai", "gpt-5.1"),  # старшая модель для сложных случаев
     "gpt-5-mini": ("openai", "gpt-5-mini"),
     "gpt-5-nano": ("openai", "gpt-5-nano"),
     "gpt-4o": ("openai", "gpt-4o"),
+    "gpt-4o-mini": ("openai", "gpt-4o-mini"),
+    "gpt-4.1-mini": ("openai", "gpt-4.1-mini"),  # базовая модель
     "gpt-4-turbo": ("openai", "gpt-4-turbo"),
     "gpt4t": ("openai", "gpt-4-turbo")  # алиас
 }
@@ -489,6 +492,21 @@ class LLMOrchestrator:
                         if response.status_code == 200:
                             data = response.json()
                             logger.info(f"OpenAI Responses API success: model={model_id}, api=responses")
+                            # Normalize to Chat Completions format
+                            # Responses API returns: {"output": [{"content": [{"text": "..."}]}]}
+                            if 'choices' not in data and 'output' in data:
+                                output_text = ""
+                                for output_item in data.get('output', []):
+                                    for content_item in output_item.get('content', []):
+                                        if content_item.get('type') == 'output_text':
+                                            output_text += content_item.get('text', '')
+                                        elif 'text' in content_item:
+                                            output_text += content_item.get('text', '')
+                                # Convert to Chat Completions format
+                                data = {
+                                    'choices': [{'message': {'content': output_text or str(data)}}],
+                                    'usage': data.get('usage', {})
+                                }
                             return data
                         elif response.status_code in [404, 405, 501]:  # Method not allowed/Not implemented
                             logger.warning(f"Responses API not supported, falling back to chat/completions")
@@ -542,13 +560,18 @@ class LLMOrchestrator:
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
                 
-            return {
+            # Store raw config for dict-style access
+            result = {
                 'openai': LLMConfig(**config.get('openai', {})),
                 'circuit_breaker': CircuitBreakerConfig(**config.get('circuit_breaker', {})),
                 'cost_tracking': CostTrackingConfig(**config.get('cost_tracking', {})),
                 'budgets': BudgetConfig(**config.get('budgets', {})),
-                'truncate_strategy': TruncateStrategyConfig(**config.get('truncate_strategy', {}))
+                'truncate_strategy': TruncateStrategyConfig(**config.get('truncate_strategy', {})),
+                # Keep raw sections for dict-style access
+                'timeouts': config.get('timeouts', {'connect_ms': 5000, 'read_ms': 60000}),
+                'retries': config.get('retries', {'max_attempts': 3, 'backoff_ms': 250}),
             }
+            return result
         except Exception as e:
             logger.warning(f"Ошибка загрузки конфигурации: {e}. Использую дефолтные значения.")
             return {
@@ -556,7 +579,9 @@ class LLMOrchestrator:
                 'circuit_breaker': CircuitBreakerConfig(),
                 'cost_tracking': CostTrackingConfig(),
                 'budgets': BudgetConfig(),
-                'truncate_strategy': TruncateStrategyConfig()
+                'truncate_strategy': TruncateStrategyConfig(),
+                'timeouts': {'connect_ms': 5000, 'read_ms': 60000},
+                'retries': {'max_attempts': 3, 'backoff_ms': 250},
             }
             
     def _load_system_prompt(self) -> str:
@@ -819,10 +844,12 @@ class LLMOrchestrator:
             logger.warning(f"Idempotency store error: {e}")
             
     async def generate_response(
-        self, 
-        user_prompt: str, 
+        self,
+        user_prompt: str,
         context: Optional[Dict[str, Any]] = None,
-        force_model: Optional[str] = None
+        force_model: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        message_history: Optional[List[Dict[str, str]]] = None
     ) -> LLMResponse:
         """Генерация ответа от LLM с новой логикой моделей"""
         start_time = time.time()
@@ -830,7 +857,9 @@ class LLMOrchestrator:
         
         try:
             # Выбор модели с автодетектом
-            cfg_default = force_model or self.config.get('openai', {}).get('default_model', 'gpt-4o')
+            # Access LLMConfig attribute directly (it's a Pydantic model, not dict)
+            openai_config = self.config.get('openai', LLMConfig())
+            cfg_default = force_model or (openai_config.default_model if hasattr(openai_config, 'default_model') else 'gpt-4o')
             chosen_model = await self.choose_runtime_model(cfg_default)
             
             # Проверка idempotency
@@ -862,7 +891,9 @@ class LLMOrchestrator:
                 )
                 
             # Загрузка конфигурации и промптов
-            system_prompt = self._load_system_prompt()
+            # Используем переданный system_prompt если есть, иначе грузим из файла
+            if not system_prompt:
+                system_prompt = self._load_system_prompt()
             business_rules = self._load_business_rules()
             
             # Санитизация входного промпта
@@ -894,15 +925,20 @@ class LLMOrchestrator:
                 )
                 
             # Подготовка сообщений для API
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
-            
+            messages = [{"role": "system", "content": system_prompt}]
+
             # Добавление контекста если есть
             if context:
-                context_str = f"Контекст диалога: {json.dumps(context, ensure_ascii=False, indent=2)}"
-                messages.insert(1, {"role": "system", "content": context_str})
+                context_str = f"Контекст диалога: {json.dumps(context, ensure_ascii=False)}"
+                messages.append({"role": "system", "content": context_str})
+
+            # Добавление истории сообщений (если есть)
+            if message_history:
+                for msg in message_history[-10:]:  # Последние 10 сообщений
+                    messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+
+            # Добавление текущего сообщения пользователя
+            messages.append({"role": "user", "content": user_prompt})
             
             # Оценка токенов для бюджетного контроля
             total_text = " ".join(msg["content"] for msg in messages)
@@ -1046,8 +1082,8 @@ class LLMOrchestrator:
             if self.config['cost_tracking'].enabled:
                 await self._update_cost_metrics(tokens_used, cost)
                 
-            # Успешное выполнение
-            await self.circuit_breaker.record_success()
+            # Успешное выполнение (circuit_breaker уже определен выше)
+            await circuit_breaker.record_success()
             
             # Структурированное логирование LLM операции
             logger.info("LLM operation completed", 
@@ -1137,8 +1173,9 @@ class LLMOrchestrator:
             health["redis_error"] = str(e)
             
         try:
-            # Проверка Circuit Breaker
-            if not await self.circuit_breaker.can_execute():
+            # Проверка Circuit Breaker (используем дефолтную модель)
+            default_cb = self._get_circuit_breaker('gpt-4o')
+            if not await default_cb.can_execute():
                 health["circuit_breaker_status"] = "open"
                 health["status"] = "degraded"
         except Exception as e:

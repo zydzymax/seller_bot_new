@@ -47,10 +47,10 @@ class FlowRouter:
             logger.info("Using legacy FlowManager for textile_manufacturing")
 
         elif self.domain == Domain.AI_SELLER_SELF:
-            # Use new universal flow manager
-            from dialog.universal_flow_manager import get_universal_flow_manager
-            self.flow_manager = get_universal_flow_manager()
-            logger.info("Using UniversalFlowManager for ai_seller_self")
+            # Use new two-layer flow manager (pre-bot + AI seller)
+            from dialog.two_layer_flow_manager import get_two_layer_flow_manager
+            self.flow_manager = get_two_layer_flow_manager()
+            logger.info("Using TwoLayerFlowManager for ai_seller_self")
 
         else:
             logger.error(f"Unknown domain: {self.domain}")
