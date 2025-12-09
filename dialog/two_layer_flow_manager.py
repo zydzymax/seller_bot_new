@@ -95,6 +95,10 @@ class TwoLayerContext:
     preferred_time: str = ""  # выбранное время ("днём", "вечером" и т.п.)
     client_contact: str = ""  # контакт клиента
 
+    # Флаги для предотвращения зацикливания
+    small_leads_mentioned: bool = False  # Уже сказали про малый объём заявок?
+    price_objection_count: int = 0  # Счётчик возражений по цене
+
     def to_dict(self) -> dict:
         return {
             "conversation_id": self.conversation_id,
@@ -112,7 +116,9 @@ class TwoLayerContext:
             "last_ai_mode": self.last_ai_mode,
             "conversation_stage": self.conversation_stage,
             "preferred_time": self.preferred_time,
-            "client_contact": self.client_contact
+            "client_contact": self.client_contact,
+            "small_leads_mentioned": self.small_leads_mentioned,
+            "price_objection_count": self.price_objection_count
         }
 
     @classmethod
@@ -133,7 +139,9 @@ class TwoLayerContext:
             last_ai_mode=data.get("last_ai_mode", ""),
             conversation_stage=data.get("conversation_stage", "prebot"),
             preferred_time=data.get("preferred_time", ""),
-            client_contact=data.get("client_contact", "")
+            client_contact=data.get("client_contact", ""),
+            small_leads_mentioned=data.get("small_leads_mentioned", False),
+            price_objection_count=data.get("price_objection_count", 0)
         )
 
 
@@ -358,22 +366,37 @@ class TwoLayerFlowManager:
 
         # Определяем режим
         mode = self._detect_ai_mode(message, context)
-        logger.info(f"AI Seller mode detected: {mode}")
+        logger.info(f"AI Seller mode detected: {mode}, price_objection_count={context.price_objection_count}")
 
-        # Генерируем ответ через новый оркестратор
+        # --- Обновляем счётчики и флаги ДО генерации ---
+
+        # Счётчик возражений по цене
+        if mode == "price_objection":
+            context.price_objection_count += 1
+            logger.info(f"Price objection #{context.price_objection_count}")
+        elif mode == "closing":
+            # Если клиент готов к closing — сбрасываем счётчик возражений
+            context.price_objection_count = 0
+
+        # Флаг "уже говорили про малый объём"
+        if mode == "not_fit_small_leads":
+            context.small_leads_mentioned = True
+            logger.info("Small leads mentioned — flag set")
+
+        # Генерируем ответ через оркестратор
         response = await self._generate_ai_response_with_mode(message, context, mode)
 
-        # Обновляем контекст после ответа
+        # --- Обновляем контекст ПОСЛЕ ответа ---
+
         if mode == "main_pitch":
             context.has_main_pitch = True
             context.conversation_stage = "ai_seller"
 
-        # Если режим closing и ответ содержит вопрос про время — ждём время
+        # Режим closing — сразу переходим на стадию ожидания времени
+        # (не зависим от парсинга текста ответа)
         if mode == "closing":
-            # Проверяем, спросили ли мы про время в ответе
-            if any(kw in response.lower() for kw in ["когда удобн", "в какое время", "днём или вечером"]):
-                context.conversation_stage = "closing_wait_time"
-                logger.info("Stage -> closing_wait_time")
+            context.conversation_stage = "closing_wait_time"
+            logger.info("Stage -> closing_wait_time (mode=closing)")
 
         context.last_ai_mode = mode
 
@@ -455,34 +478,40 @@ class TwoLayerFlowManager:
         """
         Определить режим AI-продавца.
 
-        Режимы:
-            "main_pitch" - первый главный ответ после сбора слотов
-            "price_objection" - возражение по цене (дорого, нет бюджета)
-            "timing_objection" - не сейчас, позже
-            "competitor_objection" - у нас уже есть бот/подрядчик
-            "not_fit_small_leads" - слишком мало заявок (<50)
-            "closing" - готовность к следующему шагу (созвон, контакт)
-            "followup" - обычный ответ на вопросы
+        Приоритет (важен!):
+            1. main_pitch - первый главный ответ (ещё не было питча)
+            2. closing - готовность к следующему шагу (ВЫШЕ возражений!)
+            3. price_objection - возражение по цене
+            4. timing_objection - не сейчас, позже
+            5. competitor_objection - у нас уже есть бот/подрядчик
+            6. not_fit_small_leads - мало заявок (только 1 раз!)
+            7. followup - всё остальное
         """
-        # Если ещё не было главного питча
+        # 1. Если ещё не было главного питча
         if not context.has_main_pitch:
+            logger.debug("Mode: main_pitch (no pitch yet)")
             return "main_pitch"
 
-        # Проверяем возражения в порядке приоритета
+        # 2. СНАЧАЛА проверяем closing (до возражений!)
+        # Это важно: "давайте созвонимся" должно быть closing, даже если есть слово "дорого"
+        if is_closing_signal(message):
+            logger.debug("Mode: closing (ready for next step)")
+            return "closing"
+
+        # 3. Возражения по приоритету
         if is_price_objection(message):
+            logger.debug(f"Mode: price_objection (count={context.price_objection_count})")
             return "price_objection"
 
         if is_timing_objection(message):
+            logger.debug("Mode: timing_objection")
             return "timing_objection"
 
         if is_competitor_objection(message):
+            logger.debug("Mode: competitor_objection")
             return "competitor_objection"
 
-        # Проверяем готовность к закрытию (созвон, контакт)
-        if is_closing_signal(message):
-            return "closing"
-
-        # Проверяем слишком малый объём заявок
+        # 4. Малый объём заявок — только если ещё НЕ ГОВОРИЛИ об этом
         leads = context.slots.get("leads_per_month", 0)
         if isinstance(leads, str):
             try:
@@ -491,11 +520,12 @@ class TwoLayerFlowManager:
                 leads = 0
 
         if leads > 0 and leads < 50:
-            # Только если уже был main_pitch и объём реально низкий
-            if context.last_ai_mode != "not_fit_small_leads":
+            if not context.small_leads_mentioned:
+                logger.debug(f"Mode: not_fit_small_leads (leads={leads})")
                 return "not_fit_small_leads"
 
-        # Все остальные случаи — обычный followup
+        # 5. Все остальные случаи — followup
+        logger.debug("Mode: followup (default)")
         return "followup"
 
     def _extract_budget(self, message: str, context: TwoLayerContext):
@@ -570,12 +600,30 @@ class TwoLayerFlowManager:
         # Добавляем указание режима в промпт
         mode_instruction = ""
         if mode == "price_objection":
-            mode_instruction = """[MODE: price_objection]
+            objection_count = context.price_objection_count
+            if objection_count == 1:
+                # Первое возражение — полная отработка
+                mode_instruction = """[MODE: price_objection] (первое возражение)
 Клиент выразил возражение по цене (дорого, нет бюджета).
 НЕ повторяй полностью главный питч.
 Признай что сумма ощутимая, покажи экономику потерь на примере их объёма заявок.
 Если бюджет клиента ниже 25к — честно скажи что дешевле не делаем.
 Предложи конкретный следующий шаг (созвон/контакт).
+"""
+            elif objection_count == 2:
+                # Второе возражение — короткий ответ
+                mode_instruction = """[MODE: price_objection] (повторное возражение)
+Клиент ПОВТОРНО говорит про цену.
+НЕ повторяй ту же лекцию.
+Коротко (2-3 предложения): "Понимаю, это инвестиция. Если сейчас не готовы — без проблем, можно вернуться позже."
+Оставь дверь открытой, но не дави.
+"""
+            else:
+                # Третье+ возражение — вежливое завершение
+                mode_instruction = """[MODE: price_objection] (многократное возражение)
+Клиент уже несколько раз говорил про цену.
+Вежливо заверши: "Понял, сейчас это не в приоритете. Если ситуация изменится — пишите, буду рад помочь."
+НЕ продолжай продавать.
 """
         elif mode == "timing_objection":
             mode_instruction = """[MODE: timing_objection]
