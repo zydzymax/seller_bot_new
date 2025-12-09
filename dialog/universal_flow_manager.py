@@ -25,6 +25,14 @@ from utils.conversation_logger import (
 )
 from utils.simple_learner import get_learner
 from llm.orchestrator import get_orchestrator
+from dialog.intent_helpers import (
+    is_agreement,
+    is_decision_maker_self,
+    is_rejection,
+    quick_slot_extraction,
+    get_intent,
+    extract_number
+)
 
 logger = get_logger(__name__)
 
@@ -51,6 +59,9 @@ class UniversalDialogContext:
     # Flags
     greeted_today: bool = False
 
+    # История сообщений (последние N сообщений)
+    message_history: List[Dict[str, str]] = field(default_factory=list)
+
     def to_dict(self) -> dict:
         """Convert to dict for Redis storage"""
         return {
@@ -63,7 +74,8 @@ class UniversalDialogContext:
             'started_at': self.started_at,
             'last_message_at': self.last_message_at,
             'message_count': self.message_count,
-            'greeted_today': self.greeted_today
+            'greeted_today': self.greeted_today,
+            'message_history': self.message_history[-10:]  # Храним последние 10 сообщений
         }
 
     @classmethod
@@ -79,7 +91,8 @@ class UniversalDialogContext:
             started_at=data.get('started_at', time.time()),
             last_message_at=data.get('last_message_at', time.time()),
             message_count=data.get('message_count', 0),
-            greeted_today=data.get('greeted_today', False)
+            greeted_today=data.get('greeted_today', False),
+            message_history=data.get('message_history', [])
         )
 
 
@@ -98,8 +111,8 @@ class UniversalFlowManager:
         redis_url = os.getenv('REDIS_ADDR', 'redis://localhost:6379/0')
         self.redis_client = redis.from_url(redis_url, decode_responses=False)
 
-        # LLM orchestrator
-        self.llm = get_orchestrator()
+        # LLM orchestrator (initialized lazily)
+        self._llm = None
 
         # Conversation logger
         self.conv_db = get_conversation_db()
@@ -112,6 +125,12 @@ class UniversalFlowManager:
         self.bot = Bot(token=token) if token else None
 
         logger.info(f"UniversalFlowManager initialized for domain: {self.domain_name}")
+
+    async def get_llm(self):
+        """Lazy initialization of LLM orchestrator"""
+        if self._llm is None:
+            self._llm = await get_orchestrator()
+        return self._llm
 
     async def get_context(self, chat_id: int) -> UniversalDialogContext:
         """Получить или создать контекст диалога"""
@@ -183,14 +202,52 @@ class UniversalFlowManager:
                 content=message_text
             )
 
-            # Extract entities from message
-            extracted_slots = await self._extract_slots(message_text, context)
+            # Добавляем сообщение в историю контекста
+            context.message_history.append({"role": "user", "content": message_text})
 
-            # Update context slots
+            # Получаем последнее сообщение бота для контекста
+            last_bot_message = ""
+            for msg in reversed(context.message_history[:-1]):  # Исключаем только что добавленное
+                if msg.get("role") == "assistant":
+                    last_bot_message = msg.get("content", "")
+                    break
+
+            # ===== БЫСТРАЯ ЭКСТРАКЦИЯ (без LLM) =====
+            # Сначала пробуем извлечь данные паттернами
+            user_intent = get_intent(message_text)
+            logger.info(f"User intent: {user_intent}")
+
+            quick_slots = quick_slot_extraction(message_text, last_bot_message)
+            if quick_slots:
+                logger.info(f"Quick extraction found slots: {quick_slots}")
+                for slot_name, slot_value in quick_slots.items():
+                    if slot_value is not None:
+                        context.slots[slot_name] = slot_value
+                        logger.info(f"Quick saved slot: {slot_name} = {slot_value}")
+
+            # Проверка: если пользователь сказал "я" и это ответ на вопрос о ЛПР
+            if is_decision_maker_self(message_text):
+                context.slots["decision_authority"] = "owner"
+                logger.info("Set decision_authority = owner via pattern match")
+
+            # ===== LLM ЭКСТРАКЦИЯ (для сложных случаев) =====
+            logger.info(f"Extracting slots from message: '{message_text[:50]}...', state: {context.current_state}")
+            extracted_slots = await self._extract_slots(message_text, context)
+            logger.info(f"LLM extracted slots result: {extracted_slots}")
+
+            # Update context slots (не перезаписываем уже заполненные)
             for slot_name, slot_value in extracted_slots.items():
-                if slot_value is not None:
+                if slot_value is not None and slot_value != "null" and slot_name not in context.slots:
                     context.slots[slot_name] = slot_value
-                    logger.info(f"Extracted slot: {slot_name} = {slot_value}")
+                    logger.info(f"LLM saved slot: {slot_name} = {slot_value}")
+
+            logger.info(f"Current slots after extraction: {context.slots}")
+
+            # ===== ОБРАБОТКА СОГЛАСИЯ ("да", "давай", "ок") =====
+            if user_intent == "agreement":
+                logger.info("User expressed agreement - triggering state transition")
+                # Помечаем что пользователь согласился на следующий шаг
+                context.slots["_user_agreed"] = True
 
             # Determine next state (if needed)
             await self._update_state(context)
@@ -204,6 +261,9 @@ class UniversalFlowManager:
                 role="assistant",
                 content=response
             )
+
+            # Добавляем ответ бота в историю
+            context.message_history.append({"role": "assistant", "content": response})
 
             # Send response via Telegram
             await self._send_telegram_message(chat_id, response, update_id)
@@ -278,11 +338,19 @@ class UniversalFlowManager:
         if not slots_to_extract:
             return {}
 
+        # Получаем последнее сообщение бота для контекста
+        last_bot_message = ""
+        for msg in reversed(context.message_history):
+            if msg.get("role") == "assistant":
+                last_bot_message = msg.get("content", "")[:200]  # Берем первые 200 символов
+                break
+
         # Use LLM to extract
-        extraction_prompt = self._build_extraction_prompt(message_text, slots_to_extract)
+        extraction_prompt = self._build_extraction_prompt(message_text, slots_to_extract, last_bot_message)
 
         try:
-            llm_response = await self.llm.generate_response(
+            llm = await self.get_llm()
+            llm_response = await llm.generate_response(
                 user_prompt=extraction_prompt,
                 context={'chat_id': context.chat_id}
             )
@@ -295,21 +363,31 @@ class UniversalFlowManager:
             logger.error(f"Error extracting slots: {e}")
             return {}
 
-    def _build_extraction_prompt(self, message: str, slots: List[Dict]) -> str:
-        """Создать промпт для extraction"""
-        prompt = f"""Extract data from user message.
+    def _build_extraction_prompt(self, message: str, slots: List[Dict], last_bot_message: str = "") -> str:
+        """Создать промпт для extraction с контекстом"""
+        prompt = f"""Извлеки данные из ответа пользователя.
 
-Message: "{message}"
+"""
+        if last_bot_message:
+            prompt += f"""Предыдущий вопрос бота: "{last_bot_message}"
+"""
+        prompt += f"""Ответ пользователя: "{message}"
 
-Extract the following fields (return JSON):
+Извлеки следующие поля (верни JSON):
 """
         for slot in slots:
             prompt += f"\n- {slot['name']}: {slot.get('description', '')}"
             if 'examples' in slot:
-                prompt += f" (examples: {', '.join(slot['examples'][:3])})"
+                prompt += f" (примеры значений: {', '.join(slot['examples'][:3])})"
 
-        prompt += "\n\nReturn JSON with extracted values or null if not found."
-        prompt += "\nExample: {\"business_niche\": \"real_estate\", \"current_lead_volume\": 50}"
+        prompt += """
+
+ВАЖНО:
+- Если пользователь отвечает "я", "сам", "лично я" на вопрос "кто принимает решения" → decision_authority: "owner"
+- Если число (например "300", "1000") → это current_lead_volume
+- Верни JSON с извлеченными значениями или null если не найдено
+
+Пример: {"business_niche": "стоматология", "current_lead_volume": 300, "decision_authority": "owner"}"""
 
         return prompt
 
@@ -357,6 +435,10 @@ Extract the following fields (return JSON):
                     trigger=condition
                 )
 
+                # Сбрасываем флаг согласия после перехода
+                if '_user_agreed' in context.slots:
+                    del context.slots['_user_agreed']
+
                 break
 
     def _evaluate_condition(self, condition: str, context: UniversalDialogContext) -> bool:
@@ -368,22 +450,64 @@ Extract the following fields (return JSON):
         - "client_interested_in_pricing"
         """
         if not condition:
-            return True
+            return False  # Без условия - не переходить
+
+        import re
 
         # Check for specific patterns
         if "all_" in condition and "_slots_filled" in condition:
             # Extract stage name
-            import re
             match = re.search(r'all_(\w+)_slots_filled', condition)
             if match:
                 stage = match.group(1).upper()
                 return self._are_stage_slots_filled(stage, context)
 
         if "client_responded" in condition:
-            return context.message_count > 1
+            return context.message_count > 0  # Любой ответ клиента
 
-        # Default: assume true
-        return True
+        if "showed_interest" in condition:
+            return context.message_count > 0  # Считаем интерес если отвечает
+
+        if "qualified" in condition:
+            # Проверяем заполнены ли QUALIFY слоты
+            return self._are_stage_slots_filled('QUALIFY', context)
+
+        if "is_decision_maker" in condition:
+            authority = context.slots.get('decision_authority')
+            return authority in ['owner', 'decision_maker']
+
+        if "client_interested_in_pricing" in condition:
+            # Переход в OFFER когда DIAGNOSE слоты заполнены ИЛИ пользователь согласился
+            diagnose_filled = self._are_stage_slots_filled('DIAGNOSE', context)
+            user_agreed = context.slots.get('_user_agreed', False)
+            return diagnose_filled or user_agreed
+
+        if "budget_matches" in condition:
+            return 'budget_range' in context.slots
+
+        if "no_objections" in condition:
+            return True  # Пока без системы отслеживания возражений
+
+        if "all_close_slots_filled" in condition:
+            return self._are_stage_slots_filled('CLOSE', context)
+
+        # Проверка на согласие пользователя (для любых условий)
+        if "user_agreed" in condition or "agreement" in condition:
+            user_agreed = context.slots.get('_user_agreed', False)
+
+            # Дополнительная проверка на "has_some_X_data"
+            if "has_some_qualify_data" in condition:
+                has_data = 'business_niche' in context.slots or 'current_lead_volume' in context.slots
+                return user_agreed and has_data
+
+            if "has_some_diagnose_data" in condition:
+                has_data = 'decision_authority' in context.slots or 'pain_point' in context.slots
+                return user_agreed and has_data
+
+            return user_agreed
+
+        # Default: НЕ переходить если условие неизвестно
+        return False
 
     def _are_stage_slots_filled(self, stage: str, context: UniversalDialogContext) -> bool:
         """Проверить заполнены ли все slots этапа"""
@@ -408,14 +532,68 @@ Extract the following fields (return JSON):
         # Get system prompt
         system_prompt = self.domain_config.system_prompt
 
-        # Build context for LLM
+        # Build context for LLM - более явно показываем что уже собрано
+        missing_slots = self._get_missing_slots(context)
+
+        # Фильтруем внутренние слоты
+        visible_slots = {k: v for k, v in context.slots.items() if not k.startswith('_')}
+
         llm_context = {
             'current_state': context.current_state,
-            'collected_slots': context.slots,
-            'missing_slots': self._get_missing_slots(context),
+            'collected_slots': visible_slots,
+            'missing_slots': missing_slots,
             'message_count': context.message_count,
             'domain': context.domain
         }
+
+        # Добавляем явное напоминание в system_prompt о собранных данных
+        if visible_slots:
+            slots_summary = "\n\n⚠️ УЖЕ СОБРАННАЯ ИНФОРМАЦИЯ (НЕ СПРАШИВАЙ ПОВТОРНО):\n"
+            for slot_name, slot_value in visible_slots.items():
+                slots_summary += f"- {slot_name}: {slot_value}\n"
+            system_prompt = system_prompt + slots_summary
+
+        if missing_slots:
+            system_prompt += f"\n\n📋 ЕЩЁ НУЖНО УЗНАТЬ: {', '.join(missing_slots)}\n"
+
+        # ЖЁСТКОЕ ОГРАНИЧЕНИЕ на формат ответа
+        system_prompt += """
+
+🚫 СТРОГО ЗАПРЕЩЕНО В ЭТОМ ОТВЕТЕ:
+- ТОЛЬКО ОДИН ВОПРОС или ОДИН ЗАПРОС за сообщение!
+- Плохо: "Какая боль? И кто решает?" - ДВА ВОПРОСА!
+- Плохо: "Уточните email и название компании" - ДВА ЗАПРОСА!
+- Хорошо: "Какой у вас email?" - ОДИН ЗАПРОС
+- НЕ задавай вопросы из списка УЖЕ СОБРАННОЙ ИНФОРМАЦИИ выше
+- НЕ называй цену пока не спросил бюджет клиента!
+- НЕ переходи к сбору контактов пока не обсудил бюджет!
+"""
+
+        # Проверка бюджета перед ценой
+        if context.current_state == "OFFER" and "budget_range" not in context.slots:
+            system_prompt += """
+⚠️ ТЫ В СОСТОЯНИИ OFFER, НО БЮДЖЕТ НЕ ВЫЯСНЕН!
+- СНАЧАЛА спроси: "Какой бюджет комфортен для старта?"
+- ТОЛЬКО ПОСЛЕ ответа про бюджет называй цены
+- НЕ рекомендуй пакеты пока не знаешь бюджет!
+"""
+
+        # Обработка несоответствия бюджета
+        if "budget_range" in context.slots:
+            budget = context.slots.get("budget_range")
+            system_prompt += f"""
+💰 БЮДЖЕТ КЛИЕНТА: {budget}
+- Подбери пакет ПОД БЮДЖЕТ клиента
+- Если бюджет маленький (до 50к) - предложи Базовый или рассрочку
+- НЕ игнорируй бюджет, НЕ говори "Отлично!" если бюджет не совпадает с рекомендацией
+"""
+
+        if context.message_count > 1:
+            system_prompt += """
+- НЕ говори "Привет", "Здравствуйте" - ты УЖЕ поздоровался!
+- НЕ представляйся заново - клиент знает кто ты
+- Сразу переходи к делу
+"""
 
         # Check if learner has variants for current context
         learner_context = f"{context.current_state}:{context.domain}"
@@ -432,9 +610,12 @@ Extract the following fields (return JSON):
 
         # Generate response
         try:
-            llm_response = await self.llm.generate_response(
+            llm = await self.get_llm()
+            llm_response = await llm.generate_response(
                 user_prompt=message_text,
-                context=llm_context
+                context=llm_context,
+                system_prompt=system_prompt,  # Передаем промпт домена
+                message_history=context.message_history[:-1]  # Передаем историю (без текущего сообщения)
             )
 
             return llm_response.content

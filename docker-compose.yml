@@ -96,6 +96,9 @@ services:
       - METRICS_BASIC_AUTH=${METRICS_BASIC_AUTH:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       
+      # Domain настройки (ai_seller_self или textile_manufacturing)
+      - AI_SELLER_DOMAIN=${AI_SELLER_DOMAIN:-ai_seller_self}
+
       # LLM настройки
       - LLM_DEFAULT_MODEL=${LLM_DEFAULT_MODEL:-gpt-4}
       - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.7}

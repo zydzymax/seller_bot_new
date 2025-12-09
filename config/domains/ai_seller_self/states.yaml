@@ -41,6 +41,8 @@ states:
         condition: "lead_volume < 10 or inappropriate_niche"
       - to: DIAGNOSE
         condition: "all_qualify_slots_filled and qualified"
+      - to: DIAGNOSE
+        condition: "user_agreed and has_some_qualify_data"
 
   # 3. ДИАГНОСТИКА
   - name: DIAGNOSE
@@ -64,6 +66,10 @@ states:
         condition: "decision_authority == 'user'"
       - to: DEMO
         condition: "all_diagnose_slots_filled and is_decision_maker"
+      - to: DEMO
+        condition: "user_agreed and is_decision_maker"
+      - to: OFFER
+        condition: "user_agreed and has_some_diagnose_data"
 
   # 4. ДЕМОНСТРАЦИЯ
   - name: DEMO
