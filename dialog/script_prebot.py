@@ -35,6 +35,7 @@ class PreBotState(Enum):
     ASK_CURRENT_PROCESS = "ASK_CURRENT_PROCESS"
     ASK_PAIN = "ASK_PAIN"
     ASK_DECISION_MAKER = "ASK_DECISION_MAKER"
+    ASK_AVG_CHECK = "ASK_AVG_CHECK"  # Средний чек (опционально)
     HANDOFF_TO_AI = "HANDOFF_TO_AI"  # Передача в AI-продавца
 
 
@@ -63,6 +64,8 @@ PREBOT_MESSAGES = {
 • что-то другое?""",
 
     PreBotState.ASK_DECISION_MAKER: "Кто принимает решения о внедрении новых решений: вы, партнёр, руководитель?",
+
+    PreBotState.ASK_AVG_CHECK: "Чтобы потом понять окупаемость, подскажите примерный средний чек по заказу? Можно вилку, например «3–5 тысяч» или «50–100 тысяч». Если сложно сказать — напишите «не знаю».",
 }
 
 # Обязательные слоты для перехода к AI
@@ -118,7 +121,11 @@ class ScriptPreBot:
             PreBotState.ASK_CURRENT_PROCESS: "current_process",
             PreBotState.ASK_PAIN: "pain",
             PreBotState.ASK_DECISION_MAKER: "decision_maker",
+            PreBotState.ASK_AVG_CHECK: "avg_check",  # опциональный слот
         }
+
+        # Опциональные слоты (не блокируют переход к AI)
+        self.optional_slots = {"avg_check"}
 
         # Порядок состояний
         self.state_order = [
@@ -130,6 +137,7 @@ class ScriptPreBot:
             PreBotState.ASK_CURRENT_PROCESS,
             PreBotState.ASK_PAIN,
             PreBotState.ASK_DECISION_MAKER,
+            PreBotState.ASK_AVG_CHECK,  # после ЛПР, перед handoff
             PreBotState.HANDOFF_TO_AI,
         ]
 
@@ -250,6 +258,34 @@ class ScriptPreBot:
                 return "owner"
             return message.strip()
 
+        elif slot_name == "avg_check":
+            # Средний чек - опциональный слот
+            # Если клиент не знает - пропускаем
+            if any(w in message_lower for w in ["не знаю", "сложно", "затрудняюсь", "не скажу", "разный", "зависит"]):
+                return None  # Пропускаем слот
+
+            # Пытаемся извлечь число
+            number = extract_number(message)
+            if number:
+                # Корректируем если указано в тысячах
+                if number < 1000 and any(w in message_lower for w in ["тыс", "к ", "к.", "тысяч"]):
+                    number *= 1000
+                return number
+
+            # Если есть диапазон типа "50-100 тысяч" - берём среднее
+            import re
+            range_match = re.search(r'(\d+)\s*[-–]\s*(\d+)', message)
+            if range_match:
+                low = int(range_match.group(1))
+                high = int(range_match.group(2))
+                avg = (low + high) // 2
+                # Корректируем если тысячи
+                if avg < 1000 and any(w in message_lower for w in ["тыс", "тысяч"]):
+                    avg *= 1000
+                return avg
+
+            return None  # Не удалось извлечь
+
         return message.strip()
 
     def _all_slots_filled(self, context: PreBotContext) -> bool:
@@ -271,7 +307,17 @@ class ScriptPreBot:
             if next_state == PreBotState.HANDOFF_TO_AI:
                 return next_state
 
-            # Если слот не заполнен - идём в это состояние
+            # Если слот опциональный и мы уже его спрашивали - пропускаем
+            if slot_name in self.optional_slots:
+                # Если мы УЖЕ в этом состоянии - значит уже спрашивали, идём дальше
+                if context.state == next_state:
+                    continue
+                # Если ещё не спрашивали - спросим
+                if slot_name not in context.slots:
+                    return next_state
+                continue
+
+            # Если обязательный слот не заполнен - идём в это состояние
             if slot_name and slot_name not in context.slots:
                 return next_state
 

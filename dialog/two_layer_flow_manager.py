@@ -36,7 +36,12 @@ from dialog.intent_helpers import (
     is_dont_know_time,
     is_vague_time_period,
     has_specific_day_or_time,
-    extract_vague_period
+    extract_vague_period,
+    # Soft opt-out helpers
+    is_think_about,
+    is_next_week,
+    is_not_now,
+    looks_like_noise
 )
 from llm.llm_orchestrator import generate_response as llm_generate_response, select_model
 from config.tariffs_loader import (
@@ -46,6 +51,83 @@ from config.tariffs_loader import (
 )
 
 logger = get_logger(__name__)
+
+
+# ============== СРЕДНИЙ ЧЕК ПО НИШЕ ==============
+
+def parse_avg_check(slots: Dict[str, Any]) -> Optional[int]:
+    """
+    Парсит средний чек из слотов.
+
+    Returns:
+        int или None
+    """
+    raw = slots.get("avg_check")
+    if not raw:
+        return None
+    if isinstance(raw, int):
+        return raw
+    import re
+    m = re.search(r"\d[\d\s]*", str(raw))
+    if not m:
+        return None
+    try:
+        return int(m.group(0).replace(" ", ""))
+    except ValueError:
+        return None
+
+
+def estimate_avg_check_from_niche(slots: Dict[str, Any]) -> Optional[int]:
+    """
+    Оценивает средний чек на основе ниши клиента.
+
+    Returns:
+        Примерный средний чек или None
+    """
+    niche = (slots.get("niche") or "").lower()
+
+    # Швейная фабрика / опт / производство — высокий чек B2B
+    if any(k in niche for k in ["швейн", "пошив", "фабрик", "производство", "опт", "текстил"]):
+        return 80000  # порядок 50–150k
+
+    # Стройматериалы / оптовые поставки
+    if any(k in niche for k in ["строймат", "строител", "склад", "оптовые поставки", "оптовая продажа", "стройк"]):
+        return 60000  # порядок 30–100k
+
+    # Онлайн-школы / эксперты / инфобизнес
+    if any(k in niche for k in ["онлайн-школ", "курс", "обучен", "инфобизн", "ментор", "коуч", "тренинг"]):
+        return 20000  # порядок 10–30k
+
+    # Стоматология / медицина
+    if any(k in niche for k in ["стоматолог", "клиник", "медицин", "имплант", "ортодонт", "стомат"]):
+        return 8000  # порядок 5–15k
+
+    # Бьюти / массаж / салоны — низкий чек
+    if any(k in niche for k in ["бьюти", "салон", "маникюр", "косметолог", "массаж", "парикмах", "визаж"]):
+        return 4000  # порядок 2–6k
+
+    # Недвижимость — высокий чек
+    if any(k in niche for k in ["недвиж", "квартир", "риелтор", "агентство недв", "застройщ"]):
+        return 150000  # комиссия от сделки
+
+    # Авто — средний/высокий чек
+    if any(k in niche for k in ["авто", "машин", "автосал", "автосерв", "сто ", "шиномонт"]):
+        return 15000  # порядок 5–30k
+
+    # Юридические услуги
+    if any(k in niche for k in ["юрист", "юридич", "адвокат", "нотариус", "правов"]):
+        return 25000  # порядок 10–50k
+
+    # IT / разработка / digital
+    if any(k in niche for k in ["it ", "разработ", "сайт", "приложен", "digital", "маркетинг", "реклам"]):
+        return 50000  # порядок 30–100k
+
+    # Ремонт / строительство услуги
+    if any(k in niche for k in ["ремонт", "отделк", "сантехн", "электрик"]):
+        return 30000  # порядок 10–100k
+
+    return None
+
 
 # Путь к системному промпту AI-продавца
 AI_SELLER_PROMPT_PATH = os.path.join(
@@ -106,6 +188,11 @@ class TwoLayerContext:
     small_leads_mentioned: bool = False  # Уже сказали про малый объём заявок?
     price_objection_count: int = 0  # Счётчик возражений по цене
 
+    # Soft opt-out и nurture
+    soft_opt_out: bool = False  # клиент сказал "не сейчас / не актуально"
+    contact_captured: bool = False  # контакт клиента уже получен
+    nurture_offers_made: int = 0  # сколько раз предлагали чек-лист / полезный материал
+
     def to_dict(self) -> dict:
         return {
             "conversation_id": self.conversation_id,
@@ -127,7 +214,10 @@ class TwoLayerContext:
             "client_contact": self.client_contact,
             "closing_attempts": self.closing_attempts,
             "small_leads_mentioned": self.small_leads_mentioned,
-            "price_objection_count": self.price_objection_count
+            "price_objection_count": self.price_objection_count,
+            "soft_opt_out": self.soft_opt_out,
+            "contact_captured": self.contact_captured,
+            "nurture_offers_made": self.nurture_offers_made
         }
 
     @classmethod
@@ -152,7 +242,10 @@ class TwoLayerContext:
             client_contact=data.get("client_contact", ""),
             closing_attempts=data.get("closing_attempts", 0),
             small_leads_mentioned=data.get("small_leads_mentioned", False),
-            price_objection_count=data.get("price_objection_count", 0)
+            price_objection_count=data.get("price_objection_count", 0),
+            soft_opt_out=data.get("soft_opt_out", False),
+            contact_captured=data.get("contact_captured", False),
+            nurture_offers_made=data.get("nurture_offers_made", 0)
         )
 
 
@@ -380,6 +473,7 @@ class TwoLayerFlowManager:
         contact = extract_contact(message)
         if contact or is_contact_info(message):
             context.client_contact = contact or message.strip()
+            context.contact_captured = True
             context.conversation_stage = "closed"
             logger.info(f"Contact detected in ai_seller: {context.client_contact}, stage -> closed")
 
@@ -391,6 +485,29 @@ class TwoLayerFlowManager:
                 time_info = f" ({context.preferred_time})"
 
             return f"Принял контакт, спасибо!\n\nПередам менеджеру, он свяжется{time_info}, чтобы обсудить детали."
+
+        # --- Проверяем soft opt-out: "не рассматриваю запуск", "не актуально" ---
+        if is_not_now(message) and not context.soft_opt_out:
+            context.soft_opt_out = True
+            logger.info("Soft opt-out detected")
+
+            # Если контакт уже есть — просто мягко завершаем
+            if context.contact_captured:
+                context.conversation_stage = "closed"
+                return "Понял, без проблем. Контакт у меня есть — если тема станет актуальной, можете просто написать сюда, буду на связи."
+
+            # Контакта нет — предлагаем оставить
+            return "Ок, сейчас не самое время. Чтобы не потеряться, давайте оставим контакт — если тема станет актуальной, я смогу написать. Куда удобнее: Telegram или WhatsApp?"
+
+        # --- Проверяем шумовой ответ после soft_opt_out ---
+        if context.soft_opt_out and looks_like_noise(message):
+            # Короткий ответ типа "ок", "угу" после soft opt-out
+            if context.contact_captured:
+                context.conversation_stage = "closed"
+                return "Принял, спасибо! Контакт есть, если захотите вернуться к теме автоматизации — просто напишите сюда."
+            else:
+                # Ещё раз мягко попросим контакт
+                return "Если оставите контакт (Telegram или телефон), смогу написать когда будет актуально."
 
         # Определяем режим
         mode = self._detect_ai_mode(message, context)
@@ -547,6 +664,7 @@ class TwoLayerFlowManager:
 
         if contact or is_contact_info(message):
             context.client_contact = contact or message.strip()
+            context.contact_captured = True
             context.conversation_stage = "closed"
             logger.info(f"Contact received: {context.client_contact}, stage -> closed")
 
@@ -860,6 +978,17 @@ class TwoLayerFlowManager:
                 if key == "decision_maker":
                     value = {"self": "сам клиент", "partner": "партнёр", "owner": "руководитель"}.get(value, value)
                 lines.append(f"• {label}: {value}")
+
+        # Добавляем средний чек (из данных клиента или оценка по нише)
+        avg_check = parse_avg_check(slots)
+        if avg_check:
+            lines.append(f"• Средний чек (от клиента): {avg_check:,} ₽".replace(",", " "))
+        else:
+            estimated_check = estimate_avg_check_from_niche(slots)
+            if estimated_check:
+                lines.append(f"• Средний чек (оценка по нише): ~{estimated_check:,} ₽".replace(",", " "))
+            else:
+                lines.append("• Средний чек: неизвестен (НЕЛЬЗЯ придумывать число!)")
 
         return "\n".join(lines) if lines else "Нет данных"
 

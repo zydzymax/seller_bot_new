@@ -56,18 +56,99 @@ def setup_handlers(application, flow_manager, sanitizer, antiflood):
                     import asyncio
                     await asyncio.sleep(2)
 
-    # Voice message handler - ВРЕМЕННО ОТКЛЮЧЕНО
+    # Voice message handler - Whisper transcription
     async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
-        
+
         # Антифлуд
         if await antiflood.is_limited(user_id):
             logger.info("antiflood_limit_voice", user_id=user_id)
             await update.message.reply_text("⏳ Пожалуйста, не отправляйте сообщения так быстро.")
             return
 
-        logger.info("voice_message_disabled", user_id=user_id)
-        await update.message.reply_text("🎙️ Голосовые сообщения временно отключены. Пожалуйста, напишите текстом.")
+        logger.info("voice_message_received", user_id=user_id, duration=update.message.voice.duration)
+
+        # Проверяем длительность голосового (макс 5 минут)
+        if update.message.voice.duration > 300:
+            await update.message.reply_text(
+                "🎙️ Голосовое сообщение слишком длинное (максимум 5 минут). "
+                "Пожалуйста, запишите короче или напишите текстом."
+            )
+            return
+
+        try:
+            from services.whisper import get_whisper_service, WhisperTranscriptionError
+            whisper = get_whisper_service()
+
+            if not whisper.is_available():
+                logger.warning("whisper_not_available", user_id=user_id)
+                await update.message.reply_text(
+                    "🎙️ Распознавание голоса временно недоступно. Пожалуйста, напишите текстом."
+                )
+                return
+
+            # Отправляем индикатор "печатает" пока идёт транскрипция
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+            # Транскрибируем голосовое сообщение
+            transcribed_text, duration = await whisper.transcribe_telegram_voice(
+                bot=context.bot,
+                voice_file_id=update.message.voice.file_id,
+                language="ru"
+            )
+
+            if not transcribed_text or len(transcribed_text.strip()) < 2:
+                logger.warning("whisper_empty_result", user_id=user_id)
+                await update.message.reply_text(
+                    "🎙️ Не удалось распознать голосовое сообщение. "
+                    "Попробуйте записать чётче или напишите текстом."
+                )
+                return
+
+            logger.info(
+                "voice_transcribed",
+                user_id=user_id,
+                text_length=len(transcribed_text),
+                duration=duration
+            )
+
+            # Валидация/очистка транскрибированного текста
+            sanitized_message = sanitizer(transcribed_text)
+            if sanitized_message.startswith("❗️Извините") or sanitized_message.startswith("[удалено]"):
+                await update.message.reply_text(sanitized_message)
+                return
+
+            # Обрабатываем как обычное текстовое сообщение
+            reply = await flow_manager.process(user_id, sanitized_message, context)
+
+            # Отправляем ответ
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    await update.message.reply_text(reply, disable_web_page_preview=True)
+                    break
+                except Exception as e:
+                    logger.warning("telegram_send_error", attempt=attempt+1, error=str(e))
+                    if attempt == max_retries - 1:
+                        try:
+                            await update.message.reply_text("⚠️ Произошла ошибка отправки. Повторите запрос.")
+                        except:
+                            pass
+                    else:
+                        import asyncio
+                        await asyncio.sleep(2)
+
+        except WhisperTranscriptionError as e:
+            logger.error("whisper_transcription_error", user_id=user_id, error=str(e))
+            await update.message.reply_text(
+                "🎙️ Не удалось распознать голосовое сообщение. "
+                "Пожалуйста, попробуйте ещё раз или напишите текстом."
+            )
+        except Exception as e:
+            logger.error("voice_handler_error", user_id=user_id, error=str(e))
+            await update.message.reply_text(
+                "⚠️ Произошла ошибка при обработке голосового сообщения."
+            )
 
     # Audio message handler - ВРЕМЕННО ОТКЛЮЧЕНО
     async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -153,6 +153,17 @@ CLOSING_KEYWORDS = [
     "давайте начнем",
     "как начать",
     "что нужно для старта",
+    # Мягкие сигналы закрытия
+    "связаться",
+    "обсудить",
+    "обсуждать",
+    "готов попробовать",
+    "можно связаться",
+    "когда созвониться",
+    "когда позвонить",
+    "в какое время",
+    "во сколько",
+    "запишите меня",
 ]
 
 # Паттерны выбора времени (ответ на "когда удобно?")
@@ -185,11 +196,66 @@ TIME_PREFERENCE_KEYWORDS = [
 
 # Паттерны контактных данных
 CONTACT_PATTERNS = [
-    r"@\w+",  # telegram username
-    r"\+?\d[\d\s\-\(\)]{8,}",  # телефон
-    r"[\w\.-]+@[\w\.-]+\.\w+",  # email
+    # Telegram
+    r"@\w{3,}",  # telegram username (@username, минимум 3 символа)
     r"t\.me/\w+",  # telegram link
-    r"wa\.me/\d+",  # whatsapp link
+    r"tg://resolve\?domain=\w+",  # telegram deep link
+    r"telegram[:\s]+@?\w+",  # "telegram: username" или "telegram @username"
+
+    # Телефоны (российские и международные)
+    r"\+7[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",  # +7 (999) 123-45-67
+    r"8[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",  # 8 (999) 123-45-67
+    r"\+?\d{1,3}[\s\-]?\d{9,12}",  # международный формат
+    r"(?<!\d)\d{10,11}(?!\d)",  # 10-11 цифр подряд (без + в начале)
+
+    # WhatsApp
+    r"wa\.me/\d+",  # wa.me/79991234567
+    r"whatsapp[:\s]+[\+\d\s\-\(\)]{10,}",  # "whatsapp: +7 999 123-45-67"
+    r"ватсап[:\s]+[\+\d\s\-\(\)]{10,}",  # "ватсап: +7 999 123-45-67"
+    r"вотсап[:\s]+[\+\d\s\-\(\)]{10,}",  # "вотсап: ..."
+    r"вацап[:\s]+[\+\d\s\-\(\)]{10,}",  # "вацап: ..."
+
+    # MAX (VK Мессенджер, ранее MAX)
+    r"max[:\s]+@?\w+",  # "max: username" или "max @username"
+    r"макс[:\s]+@?\w+",  # "макс: username"
+    r"vk\.me/\w+",  # vk.me/username
+    r"vk\.com/\w+",  # vk.com/username
+
+    # Email
+    r"[\w\.-]+@[\w\.-]+\.\w{2,}",  # email с доменом минимум 2 символа
+
+    # Viber
+    r"viber[:\s]+[\+\d\s\-\(\)]{10,}",  # "viber: +7 999 123-45-67"
+    r"вайбер[:\s]+[\+\d\s\-\(\)]{10,}",  # "вайбер: ..."
+]
+
+# Ключевые слова, указывающие на наличие контакта в сообщении
+CONTACT_KEYWORDS = [
+    "мой номер",
+    "мой телефон",
+    "вот номер",
+    "вот телефон",
+    "звоните",
+    "позвоните",
+    "напишите в",
+    "пишите в",
+    "свяжитесь",
+    "контакт",
+    "мой контакт",
+    "вот контакт",
+    "telegram",
+    "телеграм",
+    "телега",
+    "whatsapp",
+    "ватсап",
+    "вотсап",
+    "вацап",
+    "viber",
+    "вайбер",
+    "max",
+    "макс",
+    "вк",
+    "вконтакте",
 ]
 
 # Паттерны "не знаю когда" (расплывчатый ответ на вопрос о времени)
@@ -390,7 +456,7 @@ def is_time_preference(text: str) -> bool:
 def is_contact_info(text: str) -> bool:
     """
     Проверяет, содержит ли текст контактные данные.
-    Телефон, telegram, email и т.п.
+    Телефон, telegram, WhatsApp, MAX, email и т.п.
 
     Args:
         text: Текст сообщения пользователя
@@ -399,9 +465,21 @@ def is_contact_info(text: str) -> bool:
         True если содержит контакт
     """
     t = (text or "").strip()
+    t_lower = t.lower()
+
+    # Проверяем паттерны контактов
     for pattern in CONTACT_PATTERNS:
         if re.search(pattern, t, re.IGNORECASE):
             return True
+
+    # Проверяем ключевые слова с номером телефона
+    # Например: "мой номер 89991234567" или "звоните +7 999 123 45 67"
+    has_keyword = any(kw in t_lower for kw in CONTACT_KEYWORDS)
+    has_digits = bool(re.search(r'\d{7,}', t.replace(" ", "").replace("-", "")))
+
+    if has_keyword and has_digits:
+        return True
+
     return False
 
 
@@ -422,15 +500,51 @@ def extract_time_preference(text: str) -> Optional[str]:
 def extract_contact(text: str) -> Optional[str]:
     """
     Извлекает контактную информацию из текста.
+    Поддерживает телефоны, telegram, WhatsApp, MAX, email и т.п.
 
     Returns:
         Контакт или None
     """
     t = (text or "").strip()
+
+    # Приоритет: сначала ищем более специфичные паттерны
+    # Telegram username (@username) - самый частый случай
+    tg_match = re.search(r"@\w{3,}", t)
+    if tg_match:
+        return tg_match.group(0)
+
+    # Телефон в формате +7 или 8
+    phone_patterns = [
+        r"\+7[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",
+        r"8[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",
+        r"\+?\d{1,3}[\s\-]?\d{9,12}",
+    ]
+    for pattern in phone_patterns:
+        match = re.search(pattern, t)
+        if match:
+            # Нормализуем телефон - убираем лишние символы
+            phone = re.sub(r"[\s\-\(\)]", "", match.group(0))
+            return phone
+
+    # Остальные паттерны
     for pattern in CONTACT_PATTERNS:
         match = re.search(pattern, t, re.IGNORECASE)
         if match:
             return match.group(0)
+
+    # Если есть ключевое слово и 10-11 цифр подряд - это телефон
+    t_lower = t.lower()
+    has_keyword = any(kw in t_lower for kw in CONTACT_KEYWORDS)
+    if has_keyword:
+        # Ищем последовательность из 10-11 цифр
+        digits_only = re.sub(r"\D", "", t)
+        if len(digits_only) >= 10:
+            # Берём последние 10-11 цифр (сам номер)
+            if len(digits_only) == 11 and digits_only[0] in "78":
+                return "+" + "7" + digits_only[1:]  # Нормализуем к +7
+            elif len(digits_only) == 10:
+                return "+7" + digits_only  # Добавляем код страны
+
     return None
 
 
@@ -537,6 +651,114 @@ def get_intent(text: str) -> str:
         return "info"
 
     return "unknown"
+
+
+# ============== SOFT OPT-OUT HELPERS ==============
+
+# Паттерны "я подумаю"
+THINK_ABOUT_KEYWORDS = [
+    "я подумаю",
+    "нужно подумать",
+    "надо подумать",
+    "подумаю",
+    "дайте подумать",
+    "посмотрим",
+    "пока рано",
+    "ещё подумаю",
+    "надо обдумать",
+]
+
+# Паттерны "не сейчас / не актуально"
+NOT_NOW_KEYWORDS = [
+    "не рассматриваю запуск",
+    "не рассматриваю пока",
+    "не актуально",
+    "пока не актуально",
+    "не интересно пока",
+    "чуть попозже",
+    "сейчас не до этого",
+    "не до этого",
+    "не вовремя",
+    "не в приоритете",
+    "может позже",
+]
+
+# Паттерны "на следующей неделе"
+NEXT_WEEK_KEYWORDS = [
+    "на следующей неделе",
+    "следующей неделе",
+    "со следующей недели",
+    "с понедельника",
+    "со следующего понедельника",
+]
+
+
+def is_think_about(text: str) -> bool:
+    """
+    Проверяет, говорит ли клиент "я подумаю".
+
+    Args:
+        text: Текст сообщения пользователя
+
+    Returns:
+        True если клиент хочет подумать
+    """
+    t = (text or "").lower().strip()
+    return any(phrase in t for phrase in THINK_ABOUT_KEYWORDS)
+
+
+def is_next_week(text: str) -> bool:
+    """
+    Проверяет, говорит ли клиент "на следующей неделе".
+
+    Args:
+        text: Текст сообщения пользователя
+
+    Returns:
+        True если указана следующая неделя
+    """
+    t = (text or "").lower().strip()
+    return any(phrase in t for phrase in NEXT_WEEK_KEYWORDS)
+
+
+def is_not_now(text: str) -> bool:
+    """
+    Проверяет, говорит ли клиент что сейчас не актуально.
+    "не рассматриваю запуск", "не актуально", "позже" и т.п.
+
+    Args:
+        text: Текст сообщения пользователя
+
+    Returns:
+        True если клиент откладывает/отказывается мягко
+    """
+    if not text:
+        return False
+    t = text.lower().strip()
+    return any(phrase in t for phrase in NOT_NOW_KEYWORDS)
+
+
+def looks_like_noise(text: str) -> bool:
+    """
+    Проверяет, является ли сообщение "шумом" (ок, угу, ага и т.п.)
+
+    Args:
+        text: Текст сообщения пользователя
+
+    Returns:
+        True если это короткий шумовой ответ
+    """
+    if not text:
+        return False
+    t = text.strip().lower()
+
+    # Очень короткие ответы без русских/английских букв
+    if len(t) <= 3 and not any(ch.isalpha() for ch in t):
+        return True
+
+    # Односложные подтверждения
+    noise_words = ["ок", "окей", "угу", "ага", "ясно", "понял", "понятно", "ладно", "хорошо"]
+    return t in noise_words
 
 
 # ============== CLOSING HELPERS ==============
