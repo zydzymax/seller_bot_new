@@ -192,6 +192,69 @@ CONTACT_PATTERNS = [
     r"wa\.me/\d+",  # whatsapp link
 ]
 
+# Паттерны "не знаю когда" (расплывчатый ответ на вопрос о времени)
+DONT_KNOW_TIME_KEYWORDS = [
+    "не знаю",
+    "не уверен",
+    "сложно сказать",
+    "затрудняюсь",
+    "пока не знаю",
+    "не могу сказать",
+    "сложно",
+    "хз",
+    "без понятия",
+    "не определился",
+    "не определилась",
+    "пока не определился",
+    "надо подумать",
+    "подумаю",
+    "я подумаю",
+]
+
+# Паттерны расплывчатого периода (без конкретного дня/времени)
+VAGUE_PERIOD_KEYWORDS = [
+    "на следующей неделе",
+    "следующая неделя",
+    "на этой неделе",
+    "эта неделя",
+    "в начале недели",
+    "в конце недели",
+    "ближе к концу недели",
+    "в первой половине недели",
+    "во второй половине недели",
+    "через неделю",
+    "через пару дней",
+    "на днях",
+    "скоро",
+    "в ближайшее время",
+]
+
+# Паттерны конкретного дня/времени
+SPECIFIC_DAY_PATTERNS = [
+    r"в понедельник",
+    r"во вторник",
+    r"в среду",
+    r"в четверг",
+    r"в пятницу",
+    r"в субботу",
+    r"в воскресенье",
+    r"понедельник",
+    r"вторник",
+    r"среда",
+    r"среду",
+    r"четверг",
+    r"пятница",
+    r"пятницу",
+    r"\d{1,2}\s*(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)",
+    r"\d{1,2}[./]\d{1,2}",  # 15.12, 15/12
+]
+
+SPECIFIC_TIME_PATTERNS = [
+    r"\d{1,2}[:\.]?\d{0,2}\s*(часов|час|ч\.?)",  # 15 часов, 15:00
+    r"в\s+\d{1,2}[:\.]?\d{0,2}",  # в 15:00, в 15
+    r"\d{1,2}:\d{2}",  # 15:00
+]
+
 
 def is_agreement(text: str) -> bool:
     """
@@ -474,3 +537,78 @@ def get_intent(text: str) -> str:
         return "info"
 
     return "unknown"
+
+
+# ============== CLOSING HELPERS ==============
+
+def is_dont_know_time(text: str) -> bool:
+    """
+    Проверяет, говорит ли клиент что не знает когда удобно.
+    "не знаю", "сложно сказать", "подумаю" и т.п.
+
+    Args:
+        text: Текст сообщения пользователя
+
+    Returns:
+        True если клиент не может определиться с временем
+    """
+    t = (text or "").lower().strip()
+    return any(phrase in t for phrase in DONT_KNOW_TIME_KEYWORDS)
+
+
+def is_vague_time_period(text: str) -> bool:
+    """
+    Проверяет, указал ли клиент расплывчатый период без конкретного дня.
+    "на следующей неделе", "в начале недели", "через пару дней"
+
+    Args:
+        text: Текст сообщения пользователя
+
+    Returns:
+        True если указан только период, без конкретики
+    """
+    t = (text or "").lower().strip()
+    # Если есть расплывчатый период И нет конкретного дня
+    has_vague = any(phrase in t for phrase in VAGUE_PERIOD_KEYWORDS)
+    has_specific = has_specific_day_or_time(text)
+    return has_vague and not has_specific
+
+
+def has_specific_day_or_time(text: str) -> bool:
+    """
+    Проверяет, содержит ли текст конкретный день или время.
+    "в понедельник", "15 декабря", "в 15:00"
+
+    Args:
+        text: Текст сообщения пользователя
+
+    Returns:
+        True если есть конкретный день или время
+    """
+    t = (text or "").lower().strip()
+
+    # Проверяем конкретные дни
+    for pattern in SPECIFIC_DAY_PATTERNS:
+        if re.search(pattern, t, re.IGNORECASE):
+            return True
+
+    # Проверяем конкретное время
+    for pattern in SPECIFIC_TIME_PATTERNS:
+        if re.search(pattern, t, re.IGNORECASE):
+            return True
+
+    return False
+
+
+def extract_vague_period(text: str) -> Optional[str]:
+    """
+    Извлекает расплывчатый период из текста.
+
+    Returns:
+        Строка с периодом ("следующая неделя", "начало недели") или None
+    """
+    t = (text or "").lower().strip()
+    for phrase in VAGUE_PERIOD_KEYWORDS:
+        if phrase in t:
+            return phrase
+    return None

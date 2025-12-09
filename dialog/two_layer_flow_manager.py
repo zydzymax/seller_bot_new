@@ -31,7 +31,12 @@ from dialog.intent_helpers import (
     is_time_preference,
     is_contact_info,
     extract_time_preference,
-    extract_contact
+    extract_contact,
+    # Closing helpers
+    is_dont_know_time,
+    is_vague_time_period,
+    has_specific_day_or_time,
+    extract_vague_period
 )
 from llm.llm_orchestrator import generate_response as llm_generate_response, select_model
 from config.tariffs_loader import (
@@ -92,8 +97,10 @@ class TwoLayerContext:
     conversation_stage: str = "prebot"
 
     # Данные закрытия
-    preferred_time: str = ""  # выбранное время ("днём", "вечером" и т.п.)
+    preferred_period: str = ""  # расплывчатый период ("следующая неделя", "начало недели")
+    preferred_time: str = ""  # конкретное время ("днём", "в понедельник 15:00")
     client_contact: str = ""  # контакт клиента
+    closing_attempts: int = 0  # счётчик вопросов про время (макс 2)
 
     # Флаги для предотвращения зацикливания
     small_leads_mentioned: bool = False  # Уже сказали про малый объём заявок?
@@ -115,8 +122,10 @@ class TwoLayerContext:
             "has_main_pitch": self.has_main_pitch,
             "last_ai_mode": self.last_ai_mode,
             "conversation_stage": self.conversation_stage,
+            "preferred_period": self.preferred_period,
             "preferred_time": self.preferred_time,
             "client_contact": self.client_contact,
+            "closing_attempts": self.closing_attempts,
             "small_leads_mentioned": self.small_leads_mentioned,
             "price_objection_count": self.price_objection_count
         }
@@ -138,8 +147,10 @@ class TwoLayerContext:
             has_main_pitch=data.get("has_main_pitch", False),
             last_ai_mode=data.get("last_ai_mode", ""),
             conversation_stage=data.get("conversation_stage", "prebot"),
+            preferred_period=data.get("preferred_period", ""),
             preferred_time=data.get("preferred_time", ""),
             client_contact=data.get("client_contact", ""),
+            closing_attempts=data.get("closing_attempts", 0),
             small_leads_mentioned=data.get("small_leads_mentioned", False),
             price_objection_count=data.get("price_objection_count", 0)
         )
@@ -407,11 +418,19 @@ class TwoLayerFlowManager:
         message: str,
         context: TwoLayerContext
     ) -> str:
-        """Обработка стадии закрытия (время/контакт)"""
-        stage = context.conversation_stage
-        logger.info(f"Closing stage: {stage}")
+        """
+        Обработка стадии закрытия (время/контакт).
 
-        # Проверяем возражения — если есть, возвращаемся к AI Seller
+        Ключевые правила:
+        - Макс 2 открытых вопроса про время (closing_attempts)
+        - Если "не знаю" + attempts >= 2 → предлагаем оставить контакт или мягко сворачиваем
+        - Если конкретный день/время → сразу к контакту
+        - Если расплывчатый период → уточняем 1 раз с альтернативами
+        """
+        stage = context.conversation_stage
+        logger.info(f"Closing stage: {stage}, closing_attempts={context.closing_attempts}")
+
+        # --- Проверяем возражения — возвращаемся к AI Seller ---
         if is_price_objection(message):
             context.conversation_stage = "ai_seller"
             return await self._process_ai_seller(message, context)
@@ -421,43 +440,116 @@ class TwoLayerFlowManager:
             return await self._process_ai_seller(message, context)
 
         if is_rejection(message):
-            # Отказ — вежливо завершаем
             context.conversation_stage = "closed"
             return "Понял, без проблем. Если передумаете — напишите, буду рад помочь."
 
+        # === STAGE: closing_wait_time ===
         if stage == "closing_wait_time":
-            # Ждём выбор времени
-            time_pref = extract_time_preference(message)
+            return await self._handle_closing_wait_time(message, context)
 
-            if time_pref or is_time_preference(message):
-                # Клиент выбрал время
-                context.preferred_time = time_pref or message.strip()
-                context.conversation_stage = "closing_wait_contact"
-                logger.info(f"Time preference: {context.preferred_time}, stage -> closing_wait_contact")
-
-                return f"Отлично, {context.preferred_time}.\n\nОставьте, пожалуйста, контакт (Telegram/WhatsApp или номер телефона), куда удобнее написать — передам менеджеру для согласования точного времени."
-
-            # Если не распознали время — уточняем
-            return "Уточните, пожалуйста, когда вам удобнее: утром, днём или ближе к вечеру?"
-
+        # === STAGE: closing_wait_contact ===
         elif stage == "closing_wait_contact":
-            # Ждём контакт
-            contact = extract_contact(message)
-
-            if contact or is_contact_info(message):
-                # Клиент дал контакт
-                context.client_contact = contact or message.strip()
-                context.conversation_stage = "closed"
-                logger.info(f"Contact received: {context.client_contact}, stage -> closed")
-
-                time_info = f" в {context.preferred_time}" if context.preferred_time else ""
-                return f"Принял, спасибо!\n\nПередам контакт менеджеру, он свяжется{time_info}, чтобы согласовать детали."
-
-            # Если что-то другое — напоминаем про контакт
-            return "Оставьте, пожалуйста, контакт (Telegram, WhatsApp или телефон), чтобы менеджер мог связаться."
+            return await self._handle_closing_wait_contact(message, context)
 
         # Fallback
         return await self._process_ai_seller(message, context)
+
+    async def _handle_closing_wait_time(
+        self,
+        message: str,
+        context: TwoLayerContext
+    ) -> str:
+        """Обработка ожидания выбора времени."""
+
+        # 1. Проверяем конкретный день/время
+        if has_specific_day_or_time(message):
+            context.preferred_time = message.strip()
+            context.conversation_stage = "closing_wait_contact"
+            context.closing_attempts = 0  # сбрасываем
+            logger.info(f"Specific time: {context.preferred_time}, stage -> closing_wait_contact")
+
+            return f"Отлично, записал: {context.preferred_time}.\n\nОставьте, пожалуйста, контакт (Telegram/WhatsApp или телефон), куда удобнее написать — передам менеджеру."
+
+        # 2. Проверяем расплывчатый период ("на следующей неделе")
+        vague_period = extract_vague_period(message)
+        if vague_period or is_vague_time_period(message):
+            context.preferred_period = vague_period or message.strip()
+            context.closing_attempts += 1
+            logger.info(f"Vague period: {context.preferred_period}, attempts={context.closing_attempts}")
+
+            # Если это первый вопрос — предлагаем альтернативы
+            if context.closing_attempts <= 1:
+                return f"Хорошо, {context.preferred_period}. Удобнее в начале недели (пн–вт) или ближе к концу (чт–пт)? И в первой половине дня или после обеда?"
+
+            # Второй+ вопрос — сразу к контакту
+            context.conversation_stage = "closing_wait_contact"
+            return f"Ок, ориентируемся на {context.preferred_period}.\n\nОставьте контакт (Telegram/WhatsApp или телефон), и менеджер предложит конкретное время."
+
+        # 3. Проверяем is_time_preference (днём, утром, вечером)
+        time_pref = extract_time_preference(message)
+        if time_pref or is_time_preference(message):
+            context.preferred_time = time_pref or message.strip()
+            context.conversation_stage = "closing_wait_contact"
+            context.closing_attempts = 0
+            logger.info(f"Time preference: {context.preferred_time}, stage -> closing_wait_contact")
+
+            period_info = f" {context.preferred_period}" if context.preferred_period else ""
+            return f"Отлично,{period_info} {context.preferred_time}.\n\nОставьте контакт (Telegram/WhatsApp или телефон), куда удобнее написать."
+
+        # 4. Проверяем "не знаю" / "сложно сказать"
+        if is_dont_know_time(message):
+            context.closing_attempts += 1
+            logger.info(f"Dont know time, attempts={context.closing_attempts}")
+
+            # Если >= 2 попыток — не мучаем, предлагаем оставить контакт
+            if context.closing_attempts >= 2:
+                context.conversation_stage = "closing_wait_contact"
+                return "Давайте сделаем проще: оставьте контакт (Telegram/WhatsApp или телефон), и я на следующей неделе предложу пару вариантов по времени, а вы выберете."
+
+            # Первая попытка — предлагаем альтернативы
+            return "Понимаю. Давайте так: удобнее в первой половине дня или после обеда? Или могу сам написать на следующей неделе с парой вариантов."
+
+        # 5. Любой другой ответ — инкрементируем и проверяем лимит
+        context.closing_attempts += 1
+
+        if context.closing_attempts >= 2:
+            # Достигли лимита — мягко предлагаем оставить контакт
+            context.conversation_stage = "closing_wait_contact"
+            return "Давайте так: оставьте удобный контакт, и менеджер сам напишет с парой вариантов времени."
+
+        # Ещё можем спросить
+        return "Когда вам удобнее: в будни днём или ближе к вечеру?"
+
+    async def _handle_closing_wait_contact(
+        self,
+        message: str,
+        context: TwoLayerContext
+    ) -> str:
+        """Обработка ожидания контакта."""
+        contact = extract_contact(message)
+
+        if contact or is_contact_info(message):
+            context.client_contact = contact or message.strip()
+            context.conversation_stage = "closed"
+            logger.info(f"Contact received: {context.client_contact}, stage -> closed")
+
+            # Формируем подтверждение с учётом собранной информации
+            time_parts = []
+            if context.preferred_period:
+                time_parts.append(context.preferred_period)
+            if context.preferred_time:
+                time_parts.append(context.preferred_time)
+
+            time_info = f" ({', '.join(time_parts)})" if time_parts else ""
+            return f"Принял, спасибо!\n\nПередам контакт менеджеру, он свяжется{time_info}, чтобы согласовать детали."
+
+        # Если "не знаю" или мягкий отказ на этапе контакта
+        if is_dont_know_time(message) or is_rejection(message):
+            context.conversation_stage = "closed"
+            return "Окей, давайте ничего навязывать не буду. Если позже вернётесь к теме автоматизации заявок — можете просто написать сюда, буду на связи."
+
+        # Напоминаем про контакт
+        return "Оставьте, пожалуйста, контакт (Telegram, WhatsApp или телефон), чтобы менеджер мог связаться."
 
     async def _process_closed_stage(
         self,
