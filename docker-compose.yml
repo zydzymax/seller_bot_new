@@ -7,29 +7,29 @@ services:
   # PostgreSQL для данных
   postgres:
     image: postgres:15-alpine
-    container_name: sovani_postgres
+    container_name: saleswhisper_seller_postgres
     environment:
       POSTGRES_USER: sovani
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-[REVOKED_SECRET_REMOVED]}
-      POSTGRES_DB: sovani_ai_seller
+      POSTGRES_DB: saleswhisper_ai_seller
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/migrate_schema.sql:/docker-entrypoint-initdb.d/01_init.sql
     ports:
       - "5433:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sovani -d sovani_ai_seller"]
+      test: ["CMD-SHELL", "pg_isready -U sovani -d saleswhisper_ai_seller"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
     networks:
-      - sovani_network
+      - saleswhisper_network
 
   # Redis для кэширования и сессий
   redis:
     image: redis:7-alpine
-    container_name: sovani_redis
+    container_name: saleswhisper_seller_redis
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]}
     volumes:
       - redis_data:/data
@@ -42,14 +42,14 @@ services:
       retries: 5
     restart: unless-stopped
     networks:
-      - sovani_network
+      - saleswhisper_network
 
   # Основное приложение AI-продавца (Python)
   ai_seller:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: sovani_ai_seller
+    container_name: saleswhisper_ai_seller
     environment:
       # Основные настройки
       - APP_ENV=${APP_ENV:-production}
@@ -62,10 +62,10 @@ services:
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
       
       # База данных
-      - POSTGRES_DSN=postgresql://sovani:${POSTGRES_PASSWORD:-[REVOKED_SECRET_REMOVED]}@postgres:5432/sovani_ai_seller
+      - POSTGRES_DSN=postgresql://sovani:${POSTGRES_PASSWORD:-[REVOKED_SECRET_REMOVED]}@postgres:5432/saleswhisper_ai_seller
       
       # Redis
-      - REDIS_ADDR=redis://:${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]}@sovani_redis:6379/0
+      - REDIS_ADDR=redis://:${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]}@saleswhisper_seller_redis:6379/0
       - REDIS_PASSWORD=${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]}
       
       # Webhook настройки
@@ -120,13 +120,13 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      test: ["CMD", "curl", "-f", "http://localhost:8001/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
     restart: unless-stopped
     networks:
-      - sovani_network
+      - saleswhisper_network
 
   # Nginx reverse proxy - ОТКЛЮЧЕН (конфликт с системным nginx)
   # nginx:
@@ -147,14 +147,14 @@ services:
   #     retries: 3
   #   restart: unless-stopped
   #   networks:
-  #     - sovani_network
+  #     - saleswhisper_network
   #   deploy:
   #     replicas: 0
 
   # Prometheus для метрик
   prometheus:
     image: prom/prometheus:latest
-    container_name: sovani_prometheus
+    container_name: saleswhisper_prometheus
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -168,12 +168,12 @@ services:
       - '--web.enable-lifecycle'
     restart: unless-stopped
     networks:
-      - sovani_network
+      - saleswhisper_network
 
   # Grafana для визуализации метрик
   grafana:
     image: grafana/grafana:latest
-    container_name: sovani_grafana
+    container_name: saleswhisper_grafana
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
       - GF_INSTALL_PLUGINS=grafana-piechart-panel
@@ -184,7 +184,7 @@ services:
       - "3000:3000"
     restart: unless-stopped
     networks:
-      - sovani_network
+      - saleswhisper_network
 
 volumes:
   postgres_data:
@@ -197,5 +197,5 @@ volumes:
     driver: local
 
 networks:
-  sovani_network:
+  saleswhisper_network:
     driver: bridge

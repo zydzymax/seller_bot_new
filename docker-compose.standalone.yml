@@ -1,0 +1,15 @@
+services:
+  ai_seller:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: saleswhisper_ai_seller
+    network_mode: host
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+      - ./ai-seller-480812-33e6f9bb0964.json:/app/ai-seller-480812-33e6f9bb0964.json:ro
+    command: ["uvicorn", "bot.webhook:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]
+    restart: unless-stopped

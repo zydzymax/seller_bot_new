@@ -50,3 +50,7 @@ validators>=0.20.0
 prometheus-client>=0.20.0
 psutil>=5.9.0
 orjson>=3.10.0
+
+# Google Sheets интеграция
+gspread>=5.12.0
+google-auth>=2.25.0

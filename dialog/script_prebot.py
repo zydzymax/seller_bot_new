@@ -273,7 +273,6 @@ class ScriptPreBot:
                 return number
 
             # Если есть диапазон типа "50-100 тысяч" - берём среднее
-            import re
             range_match = re.search(r'(\d+)\s*[-–]\s*(\d+)', message)
             if range_match:
                 low = int(range_match.group(1))

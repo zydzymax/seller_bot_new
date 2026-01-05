@@ -81,7 +81,8 @@ async def generate_response(
     mode: str,
     context: Dict[str, Any],
     messages: List[Dict[str, str]],
-    system_prompt: str = None
+    system_prompt: str = None,
+    model_override: str = None
 ) -> str:
     """
     Генерация ответа через OpenAI API.
@@ -95,15 +96,20 @@ async def generate_response(
             - "competitor_objection" — "у нас уже есть"
             - "not_fit_small_leads" — мало лидов
             - "closing" — готовность к следующему шагу
+            - FSM stages: need_summary, value_pitch, commit_test, etc.
         context: Слоты и служебные данные
         messages: История диалога [{"role": ..., "content": ...}]
         system_prompt: Системный промпт (опционально)
+        model_override: Принудительно использовать эту модель (опционально)
 
     Returns:
         Текст ответа от LLM
     """
-    # Выбираем модель
-    model = select_model(mode, context)
+    # Выбираем модель (с учётом override)
+    if model_override:
+        model = model_override
+    else:
+        model = select_model(mode, context)
 
     logger.info(f"AI Seller generate_response: mode={mode}, model={model}")
 

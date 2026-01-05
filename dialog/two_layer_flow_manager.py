@@ -41,13 +41,28 @@ from dialog.intent_helpers import (
     is_think_about,
     is_next_week,
     is_not_now,
-    looks_like_noise
+    looks_like_noise,
+    # Price question detection
+    is_price_question,
+    # Positive confirmation detection
+    is_positive_confirmation
 )
 from llm.llm_orchestrator import generate_response as llm_generate_response, select_model
 from config.tariffs_loader import (
     get_tariffs_config,
     get_min_price,
     recommend_tariff
+)
+from dialog.fsm_router import (
+    decide_next_stage,
+    get_diag_question,
+    get_stage_model,
+    # Anti-interrogation
+    is_clarification_question,
+    is_short_user_reply,
+    get_simplified_prompt_instruction,
+    get_force_move_prompt,
+    MAX_CLARIFICATION_ATTEMPTS,
 )
 
 logger = get_logger(__name__)
@@ -143,81 +158,142 @@ AI_SELLER_PROMPT_PATH = os.path.join(
 
 @dataclass
 class TwoLayerContext:
-    """Контекст двухслойного диалога"""
+    """
+    Контекст двухслойного диалога с FSM-стадиями.
+
+    FSM СТАДИИ:
+    - PREBOT: сбор базовых слотов (без LLM)
+    - DIAG_Q: диагностические вопросы (без LLM, 2-3 вопроса)
+    - NEED_SUMMARY: LLM формирует резюме потребности
+    - VALUE_PITCH: LLM продаёт выгоду (без цены!)
+    - COMMIT_TEST: LLM проверяет интерес
+    - PRICE_DISCUSSION: только если клиент спросил цену
+    - OBJECTION_HANDLING: обработка возражений
+    - CLOSING: закрытие на созвон/контакт
+    - NURTURE: мягкое сопровождение
+    - CLOSED: диалог завершён
+    """
     conversation_id: str
     chat_id: int
     user_id: int
 
-    # Текущий слой: "prebot" или "ai_seller"
-    current_layer: str = "prebot"
+    # ===== FSM СТАДИЯ =====
+    # Это ГЛАВНОЕ поле, определяющее поведение бота
+    stage: str = "PREBOT"
 
-    # Контекст pre-bot
+    # Подтип для OBJECTION_HANDLING: price, timing, competitor, think_about
+    objection_type: str = ""
+
+    # ===== PREBOT =====
     prebot_state: str = "GREETING"
     prebot_message_count: int = 0
 
-    # Собранные слоты (общие для обоих слоёв)
+    # ===== DIAG_Q =====
+    diag_question_index: int = 0  # какой вопрос сейчас (0, 1, 2)
+    diag_answers: Dict[str, str] = field(default_factory=dict)  # ответы на DIAG_Q
+
+    # ===== СЛОТЫ =====
     slots: Dict[str, Any] = field(default_factory=dict)
 
-    # История сообщений
+    # ===== ИСТОРИЯ =====
     message_history: List[Dict[str, str]] = field(default_factory=list)
 
-    # Метаданные
+    # ===== МЕТАДАННЫЕ =====
     started_at: float = field(default_factory=time.time)
     last_message_at: float = field(default_factory=time.time)
     total_message_count: int = 0
 
-    # AI Seller mode tracking
-    has_main_pitch: bool = False  # Уже был главный питч?
-    last_ai_mode: str = ""  # Последний использованный режим
+    # ===== ФЛАГИ ПРОГРЕССА =====
+    problem_clarified: bool = False       # боль уточнена через DIAG_Q
+    has_need_summary: bool = False        # резюме потребности сделано
+    need_summary_text: str = ""           # текст резюме
+    value_pitch_done: bool = False        # VALUE_PITCH выполнен
+    commit_test_done: bool = False        # COMMIT_TEST выполнен
 
-    # Стадия диалога:
-    # "prebot" - сбор слотов
-    # "ai_seller" - основная продажа
-    # "closing_wait_time" - ждём выбор времени для созвона
-    # "closing_wait_contact" - ждём контакт клиента
-    # "closed" - диалог завершён
+    # ===== ЦЕНА =====
+    user_asked_price_recently: bool = False  # клиент спросил про цену
+    price_discussed: bool = False            # цена уже обсуждалась
+
+    # ===== ВОЗРАЖЕНИЯ =====
+    price_objection_count: int = 0        # сколько раз "дорого"
+    roi_explained: bool = False           # экономика уже объяснена
+    small_leads_mentioned: bool = False   # сказали про малый объём
+
+    # ===== CLOSING =====
+    closing_attempts: int = 0             # попытки закрыть на созвон (макс 2)
+    preferred_time: str = ""              # когда созвон
+    client_contact: str = ""              # контакт клиента
+    contact_captured: bool = False        # контакт получен
+
+    # ===== SOFT OPT-OUT / NURTURE =====
+    soft_opt_out: bool = False            # клиент сказал "не сейчас"
+    nurture_offers_made: int = 0          # предложений чек-листа
+
+    # ===== ANTI-INTERROGATION (защита от допроса) =====
+    clarification_attempts: int = 0       # счётчик уточняющих вопросов подряд (макс 2)
+    last_clarification_topic: str = ""    # тема, по которой уточняем
+
+    # ===== LEGACY (для совместимости) =====
+    current_layer: str = "prebot"
     conversation_stage: str = "prebot"
-
-    # Данные закрытия
-    preferred_period: str = ""  # расплывчатый период ("следующая неделя", "начало недели")
-    preferred_time: str = ""  # конкретное время ("днём", "в понедельник 15:00")
-    client_contact: str = ""  # контакт клиента
-    closing_attempts: int = 0  # счётчик вопросов про время (макс 2)
-
-    # Флаги для предотвращения зацикливания
-    small_leads_mentioned: bool = False  # Уже сказали про малый объём заявок?
-    price_objection_count: int = 0  # Счётчик возражений по цене
-
-    # Soft opt-out и nurture
-    soft_opt_out: bool = False  # клиент сказал "не сейчас / не актуально"
-    contact_captured: bool = False  # контакт клиента уже получен
-    nurture_offers_made: int = 0  # сколько раз предлагали чек-лист / полезный материал
+    has_main_pitch: bool = False
+    last_ai_mode: str = ""
+    preferred_period: str = ""
+    followup_count: int = 0
 
     def to_dict(self) -> dict:
         return {
             "conversation_id": self.conversation_id,
             "chat_id": self.chat_id,
             "user_id": self.user_id,
-            "current_layer": self.current_layer,
+            # FSM
+            "stage": self.stage,
+            "objection_type": self.objection_type,
+            # PREBOT
             "prebot_state": self.prebot_state,
             "prebot_message_count": self.prebot_message_count,
+            # DIAG_Q
+            "diag_question_index": self.diag_question_index,
+            "diag_answers": self.diag_answers,
+            # SLOTS
             "slots": self.slots,
+            # HISTORY
             "message_history": self.message_history[-15:],
+            # META
             "started_at": self.started_at,
             "last_message_at": self.last_message_at,
             "total_message_count": self.total_message_count,
-            "has_main_pitch": self.has_main_pitch,
-            "last_ai_mode": self.last_ai_mode,
-            "conversation_stage": self.conversation_stage,
-            "preferred_period": self.preferred_period,
+            # PROGRESS FLAGS
+            "problem_clarified": self.problem_clarified,
+            "has_need_summary": self.has_need_summary,
+            "need_summary_text": self.need_summary_text,
+            "value_pitch_done": self.value_pitch_done,
+            "commit_test_done": self.commit_test_done,
+            # PRICE
+            "user_asked_price_recently": self.user_asked_price_recently,
+            "price_discussed": self.price_discussed,
+            # OBJECTIONS
+            "price_objection_count": self.price_objection_count,
+            "roi_explained": self.roi_explained,
+            "small_leads_mentioned": self.small_leads_mentioned,
+            # CLOSING
+            "closing_attempts": self.closing_attempts,
             "preferred_time": self.preferred_time,
             "client_contact": self.client_contact,
-            "closing_attempts": self.closing_attempts,
-            "small_leads_mentioned": self.small_leads_mentioned,
-            "price_objection_count": self.price_objection_count,
-            "soft_opt_out": self.soft_opt_out,
             "contact_captured": self.contact_captured,
-            "nurture_offers_made": self.nurture_offers_made
+            # SOFT OPT-OUT
+            "soft_opt_out": self.soft_opt_out,
+            "nurture_offers_made": self.nurture_offers_made,
+            # ANTI-INTERROGATION
+            "clarification_attempts": self.clarification_attempts,
+            "last_clarification_topic": self.last_clarification_topic,
+            # LEGACY
+            "current_layer": self.current_layer,
+            "conversation_stage": self.conversation_stage,
+            "has_main_pitch": self.has_main_pitch,
+            "last_ai_mode": self.last_ai_mode,
+            "preferred_period": self.preferred_period,
+            "followup_count": self.followup_count,
         }
 
     @classmethod
@@ -226,26 +302,54 @@ class TwoLayerContext:
             conversation_id=data["conversation_id"],
             chat_id=data["chat_id"],
             user_id=data["user_id"],
-            current_layer=data.get("current_layer", "prebot"),
+            # FSM
+            stage=data.get("stage", "PREBOT"),
+            objection_type=data.get("objection_type", ""),
+            # PREBOT
             prebot_state=data.get("prebot_state", "GREETING"),
             prebot_message_count=data.get("prebot_message_count", 0),
+            # DIAG_Q
+            diag_question_index=data.get("diag_question_index", 0),
+            diag_answers=data.get("diag_answers", {}),
+            # SLOTS
             slots=data.get("slots", {}),
+            # HISTORY
             message_history=data.get("message_history", []),
+            # META
             started_at=data.get("started_at", time.time()),
             last_message_at=data.get("last_message_at", time.time()),
             total_message_count=data.get("total_message_count", 0),
-            has_main_pitch=data.get("has_main_pitch", False),
-            last_ai_mode=data.get("last_ai_mode", ""),
-            conversation_stage=data.get("conversation_stage", "prebot"),
-            preferred_period=data.get("preferred_period", ""),
+            # PROGRESS FLAGS
+            problem_clarified=data.get("problem_clarified", False),
+            has_need_summary=data.get("has_need_summary", False),
+            need_summary_text=data.get("need_summary_text", ""),
+            value_pitch_done=data.get("value_pitch_done", False),
+            commit_test_done=data.get("commit_test_done", False),
+            # PRICE
+            user_asked_price_recently=data.get("user_asked_price_recently", False),
+            price_discussed=data.get("price_discussed", False),
+            # OBJECTIONS
+            price_objection_count=data.get("price_objection_count", 0),
+            roi_explained=data.get("roi_explained", False),
+            small_leads_mentioned=data.get("small_leads_mentioned", False),
+            # CLOSING
+            closing_attempts=data.get("closing_attempts", 0),
             preferred_time=data.get("preferred_time", ""),
             client_contact=data.get("client_contact", ""),
-            closing_attempts=data.get("closing_attempts", 0),
-            small_leads_mentioned=data.get("small_leads_mentioned", False),
-            price_objection_count=data.get("price_objection_count", 0),
-            soft_opt_out=data.get("soft_opt_out", False),
             contact_captured=data.get("contact_captured", False),
-            nurture_offers_made=data.get("nurture_offers_made", 0)
+            # SOFT OPT-OUT
+            soft_opt_out=data.get("soft_opt_out", False),
+            nurture_offers_made=data.get("nurture_offers_made", 0),
+            # ANTI-INTERROGATION
+            clarification_attempts=data.get("clarification_attempts", 0),
+            last_clarification_topic=data.get("last_clarification_topic", ""),
+            # LEGACY
+            current_layer=data.get("current_layer", "prebot"),
+            conversation_stage=data.get("conversation_stage", "prebot"),
+            has_main_pitch=data.get("has_main_pitch", False),
+            last_ai_mode=data.get("last_ai_mode", ""),
+            preferred_period=data.get("preferred_period", ""),
+            followup_count=data.get("followup_count", 0),
         )
 
 
@@ -341,9 +445,12 @@ class TwoLayerFlowManager:
         """
         Обработать входящее сообщение.
 
-        Определяет слой и передаёт обработку:
-        - prebot: скриптовый сбор данных
-        - ai_seller: LLM-продажа
+        FSM-архитектура:
+        - PREBOT: скриптовый сбор слотов (без LLM)
+        - DIAG_Q: диагностические вопросы (без LLM)
+        - NEED_SUMMARY, VALUE_PITCH, COMMIT_TEST: LLM-стадии
+        - OBJECTION_HANDLING, CLOSING: сложные LLM-стадии
+        - NURTURE, CLOSED: завершающие стадии
         """
         chat_id = user_info.get("chat_id")
         update_id = update.get("update_id")
@@ -368,20 +475,26 @@ class TwoLayerFlowManager:
                 content=message_text
             )
 
-            # Определяем слой и обрабатываем на основе conversation_stage
-            stage = context.conversation_stage
+            # ===== FSM ROUTING =====
+            current_stage = context.stage
+            logger.info(f"FSM: Processing message, current_stage={current_stage}")
 
-            if stage == "closed":
-                # Диалог завершён — вежливый ответ без новой продажи
-                response = await self._process_closed_stage(message_text, context)
-            elif stage in ("closing_wait_time", "closing_wait_contact"):
-                # Стадия закрытия — обрабатываем время/контакт
-                response = await self._process_closing_stage(message_text, context)
-            elif context.current_layer == "prebot" and stage == "prebot":
-                response = await self._process_prebot(message_text, context)
+            # PREBOT — скриптовый сбор слотов
+            if current_stage == "PREBOT":
+                response = await self._process_prebot_fsm(message_text, context)
+
+            # DIAG_Q — диагностические вопросы (без LLM)
+            elif current_stage == "DIAG_Q":
+                response = await self._process_diag_q(message_text, context)
+
+            # CLOSED — диалог завершён
+            elif current_stage == "CLOSED":
+                response = await self._process_closed_fsm(message_text, context)
+
+            # LLM-стадии: NEED_SUMMARY, VALUE_PITCH, COMMIT_TEST, PRICE_DISCUSSION,
+            # OBJECTION_HANDLING, CLOSING, NURTURE
             else:
-                # AI Seller работает
-                response = await self._process_ai_seller(message_text, context)
+                response = await self._process_llm_stage(message_text, context)
 
             # Сохраняем ответ бота
             if response:
@@ -404,7 +517,7 @@ class TwoLayerFlowManager:
 
             return {
                 "status": "ok",
-                "layer": context.current_layer,
+                "stage": context.stage,
                 "response_sent": True,
                 "conversation_id": context.conversation_id
             }
@@ -424,13 +537,16 @@ class TwoLayerFlowManager:
                 "response_sent": False
             }
 
-    async def _process_prebot(
+    async def _process_prebot_fsm(
         self,
         message: str,
         context: TwoLayerContext
     ) -> str:
-        """Обработка скриптовым pre-bot"""
-        logger.info(f"PreBot layer: state={context.prebot_state}")
+        """
+        PREBOT стадия — скриптовый сбор слотов (без LLM).
+        После сбора всех слотов переход на DIAG_Q.
+        """
+        logger.info(f"FSM PREBOT: state={context.prebot_state}")
 
         # Создаём PreBotContext из TwoLayerContext
         prebot_ctx = PreBotContext(
@@ -447,15 +563,542 @@ class TwoLayerFlowManager:
         context.prebot_message_count = updated_ctx.message_count
         context.slots.update(updated_ctx.slots)
 
-        # Проверяем handoff в AI
+        # Проверяем handoff — переход на DIAG_Q
         if handoff:
-            logger.info("Handoff to AI Seller")
-            context.current_layer = "ai_seller"
+            logger.info("FSM: PREBOT complete → DIAG_Q")
+            context.stage = "DIAG_Q"
+            context.diag_question_index = 0
 
-            # Генерируем первое сообщение AI-продавца
-            response = await self._generate_ai_seller_intro(context)
+            # Возвращаем первый DIAG_Q вопрос (без LLM!)
+            diag_response = get_diag_question(context)
+            if diag_response:
+                return diag_response
+            else:
+                # Нет DIAG_Q вопросов — сразу на NEED_SUMMARY
+                context.stage = "NEED_SUMMARY"
+                return await self._process_llm_stage(message, context)
 
         return response
+
+    async def _process_diag_q(
+        self,
+        message: str,
+        context: TwoLayerContext
+    ) -> str:
+        """
+        DIAG_Q стадия — диагностические вопросы (БЕЗ LLM!).
+        Задаём 2-3 уточняющих вопроса по скрипту.
+        """
+        logger.info(f"FSM DIAG_Q: question_index={context.diag_question_index}")
+
+        # Определяем следующую стадию через FSM router
+        next_stage = decide_next_stage(context, message)
+        logger.info(f"FSM DIAG_Q: next_stage={next_stage}")
+
+        # Если FSM решил перейти куда-то (CLOSED, NURTURE, etc.) — переходим
+        if next_stage != "DIAG_Q":
+            context.stage = next_stage
+
+            # Если переход на LLM-стадию
+            if next_stage in ["NEED_SUMMARY", "VALUE_PITCH", "CLOSING", "NURTURE"]:
+                return await self._process_llm_stage(message, context)
+            elif next_stage == "CLOSED":
+                return await self._process_closed_fsm(message, context)
+
+        # Остаёмся в DIAG_Q — выдаём следующий вопрос
+        diag_response = get_diag_question(context)
+        if diag_response:
+            return diag_response
+        else:
+            # Вопросы закончились — переходим на NEED_SUMMARY
+            context.stage = "NEED_SUMMARY"
+            context.problem_clarified = True
+            return await self._process_llm_stage(message, context)
+
+    async def _process_llm_stage(
+        self,
+        message: str,
+        context: TwoLayerContext
+    ) -> str:
+        """
+        Обработка LLM-стадий: NEED_SUMMARY, VALUE_PITCH, COMMIT_TEST,
+        PRICE_DISCUSSION, OBJECTION_HANDLING, CLOSING, NURTURE.
+
+        ВАЖНО: Переход на следующую стадию определяет FSM router (код),
+        а НЕ LLM!
+        """
+        current_stage = context.stage
+        logger.info(f"FSM LLM stage: {current_stage}")
+
+        # Сначала определяем следующую стадию через FSM router
+        next_stage = decide_next_stage(context, message)
+        logger.info(f"FSM: {current_stage} → {next_stage}")
+
+        # Обновляем стадию
+        context.stage = next_stage
+
+        # Если перешли в CLOSED — не вызываем LLM
+        if next_stage == "CLOSED":
+            return await self._process_closed_fsm(message, context)
+
+        # Выбираем модель для стадии
+        model = get_stage_model(next_stage)
+        logger.info(f"FSM: Using model {model} for stage {next_stage}")
+
+        # Генерируем ответ через LLM
+        response = await self._generate_stage_response(message, context, next_stage, model)
+
+        return response
+
+    async def _process_closed_fsm(
+        self,
+        message: str,
+        context: TwoLayerContext
+    ) -> str:
+        """CLOSED стадия — диалог завершён."""
+        logger.info("FSM CLOSED: contact_captured=" + str(context.contact_captured))
+
+        # Если контакт был захвачен — сохраняем лид
+        if context.contact_captured and context.client_contact:
+            await self._save_lead(context, source="telegram")
+
+            time_info = ""
+            if context.preferred_period:
+                time_info = f" ({context.preferred_period})"
+            elif context.preferred_time:
+                time_info = f" ({context.preferred_time})"
+
+            return f"Принял, спасибо!\n\nМенеджер свяжется{time_info}, чтобы обсудить детали."
+
+        # Если клиент что-то спрашивает после закрытия
+        if "?" in message:
+            return "Менеджер скоро свяжется и ответит на все вопросы. Если срочное — напишите сюда."
+
+        return "Спасибо! Если появятся вопросы по автоматизации заявок — пишите."
+
+    async def _generate_stage_response(
+        self,
+        message: str,
+        context: TwoLayerContext,
+        stage: str,
+        model: str
+    ) -> str:
+        """
+        Генерация ответа LLM для конкретной FSM-стадии.
+        Каждая стадия имеет свой промпт.
+        """
+        slots_summary = self._format_slots_for_prompt(context.slots)
+
+        # Формируем промпт в зависимости от стадии
+        stage_prompts = {
+            "NEED_SUMMARY": self._get_need_summary_prompt(context, slots_summary),
+            "VALUE_PITCH": self._get_value_pitch_prompt(context, slots_summary),
+            "COMMIT_TEST": self._get_commit_test_prompt(context, slots_summary),
+            "PRICE_DISCUSSION": self._get_price_discussion_prompt(context, slots_summary, message),
+            "OBJECTION_HANDLING": self._get_objection_prompt(context, slots_summary, message),
+            "CLOSING": self._get_closing_prompt(context, slots_summary, message),
+            "NURTURE": self._get_nurture_prompt(context, slots_summary, message),
+        }
+
+        user_prompt = stage_prompts.get(stage, f"[STAGE: {stage}]\n{message}")
+
+        # Вызываем LLM с передачей user_message для anti-interrogation
+        return await self._call_llm_for_stage(user_prompt, context, stage, model, user_message=message)
+
+    def _get_need_summary_prompt(self, context: TwoLayerContext, slots: str) -> str:
+        """Промпт для NEED_SUMMARY — резюме потребности."""
+        diag_answers = "\n".join([f"- {k}: {v}" for k, v in context.diag_answers.items()])
+
+        return f"""[STAGE: NEED_SUMMARY]
+
+Задача: Сформулируй резюме ситуации клиента в 2-3 предложениях.
+Покажи, что ты понял его боль и ситуацию.
+
+Данные клиента:
+{slots}
+
+Ответы на диагностику:
+{diag_answers if diag_answers else "Нет ответов"}
+
+ФОРМАТ ОТВЕТА:
+1. Резюме ситуации (1-2 предложения)
+2. Выведенная боль (1 предложение) — НЕ СПРАШИВАЙ, УТВЕРЖДАЙ
+3. Мягкий переход: "Верно понимаю ситуацию?"
+
+ЗАПРЕЩЕНО: спрашивать "какие сложности?", называть цены, предлагать созвон."""
+
+    def _get_value_pitch_prompt(self, context: TwoLayerContext, slots: str) -> str:
+        """Промпт для VALUE_PITCH — ценностное предложение."""
+        leads = context.slots.get("leads_per_month", 100)
+
+        return f"""[STAGE: VALUE_PITCH]
+
+Задача: Покажи ценность ИИ-бота под ситуацию клиента.
+НЕ называй цены! Только ценность.
+
+Данные клиента:
+{slots}
+
+ФОРМАТ ОТВЕТА (3-4 предложения):
+1. Как ИИ-бот решает их конкретную боль
+2. Конкретная выгода для их объёма ({leads} заявок)
+3. Мягкий вопрос: "Интересно посмотреть, как это работает?"
+
+ЗАПРЕЩЕНО: называть цены, спрашивать про бюджет, давить на созвон."""
+
+    def _get_commit_test_prompt(self, context: TwoLayerContext, slots: str) -> str:
+        """Промпт для COMMIT_TEST — проверка интереса."""
+        return f"""[STAGE: COMMIT_TEST]
+
+Задача: Проверить готовность клиента к следующему шагу.
+
+Данные клиента:
+{slots}
+
+ФОРМАТ ОТВЕТА (2-3 предложения):
+"Если тема в целом интересна — можем созвониться на 15 минут, покажу на примере вашей ниши.
+Если нет — тоже ок, без навязывания."
+
+ЗАПРЕЩЕНО: давить, называть цены без запроса."""
+
+    def _get_price_discussion_prompt(self, context: TwoLayerContext, slots: str, message: str) -> str:
+        """Промпт для PRICE_DISCUSSION — обсуждение цены."""
+        return f"""[STAGE: PRICE_DISCUSSION]
+
+Клиент спросил про цену: "{message}"
+
+Данные клиента:
+{slots}
+
+ТАРИФЫ (называй только по запросу):
+• Старт — 25 000 ₽: бот в Telegram, базовый сценарий
+• Стандарт — 45-60 000 ₽: + CRM, 30 дней сопровождения
+• Про — от 90 000 ₽: несколько сценариев, аналитика
+
+ФОРМАТ ОТВЕТА:
+1. Назови тарифы коротко
+2. Рекомендуй подходящий под их объём
+3. Предложи созвониться: "Хотите обсудить детали?"
+
+Минимум 25 000 ₽. Дешевле не делаем. Скидок нет."""
+
+    def _get_objection_prompt(self, context: TwoLayerContext, slots: str, message: str) -> str:
+        """Промпт для OBJECTION_HANDLING — обработка возражений."""
+        objection_type = context.objection_type
+        count = context.price_objection_count
+
+        if objection_type == "price":
+            if count <= 1:
+                return f"""[STAGE: OBJECTION_HANDLING — цена, первый раз]
+
+Клиент: "{message}"
+
+Данные: {slots}
+
+ФОРМАТ ОТВЕТА:
+"Понимаю, сумма ощутимая. При [N] заявках даже 5% потерь — это [X] упущенных клиентов.
+Бот обычно окупается за 1-2 месяца. Но если сейчас не в приоритете — ок, можем вернуться позже."
+
+НЕ повторяй презентацию целиком."""
+            else:
+                return f"""[STAGE: OBJECTION_HANDLING — цена, повторно]
+
+Клиент повторно про цену: "{message}"
+
+ФОРМАТ ОТВЕТА (коротко!):
+"Понял. Если ситуация изменится — пишите, буду рад помочь."
+
+НЕ продолжай продавать."""
+
+        elif objection_type == "timing":
+            return f"""[STAGE: OBJECTION_HANDLING — время]
+
+Клиент: "{message}"
+
+ФОРМАТ ОТВЕТА:
+"Понял, сейчас не самое время. Оставьте контакт — напишу когда будет актуально.
+Если нет — тоже ок, без давления."
+"""
+
+        elif objection_type == "competitor":
+            return f"""[STAGE: OBJECTION_HANDLING — конкурент]
+
+Клиент говорит что есть бот/подрядчик: "{message}"
+
+ФОРМАТ ОТВЕТА:
+"Понял, уже работаете с решением. Если захотите усилить или сравнить — пишите.
+Удачи с текущим проектом!"
+
+НЕ хейти конкурентов."""
+
+        elif objection_type == "think_about":
+            return f"""[STAGE: OBJECTION_HANDLING — подумаю]
+
+Клиент: "{message}"
+
+ФОРМАТ ОТВЕТА:
+"Конечно, подумайте. Если будут вопросы — пишите сюда.
+Могу скинуть краткое описание, чтобы было что показать коллегам?"
+"""
+
+        return f"""[STAGE: OBJECTION_HANDLING]
+
+Клиент: "{message}"
+
+Отработай возражение мягко, без давления. 2-3 предложения."""
+
+    def _get_closing_prompt(self, context: TwoLayerContext, slots: str, message: str) -> str:
+        """Промпт для CLOSING — закрытие на контакт."""
+        attempts = context.closing_attempts
+
+        if attempts == 0:
+            return f"""[STAGE: CLOSING — первый вопрос]
+
+Клиент готов к следующему шагу.
+
+ФОРМАТ ОТВЕТА (одно предложение):
+"Когда удобнее созвониться — в будни днём или вечером?"
+
+ТОЛЬКО этот вопрос. Ничего больше."""
+
+        elif attempts == 1:
+            return f"""[STAGE: CLOSING — контакт]
+
+Клиент ответил про время: "{message}"
+
+ФОРМАТ ОТВЕТА:
+"Отлично. Оставьте контакт (Telegram или телефон), передам менеджеру."
+"""
+
+        else:
+            return f"""[STAGE: CLOSING — финал]
+
+Время: {context.preferred_time or context.preferred_period or message}
+
+ФОРМАТ ОТВЕТА:
+"Принял, спасибо! Менеджер свяжется, чтобы согласовать детали."
+"""
+
+    def _get_nurture_prompt(self, context: TwoLayerContext, slots: str, message: str) -> str:
+        """Промпт для NURTURE — мягкое сопровождение."""
+        offers = context.nurture_offers_made
+
+        if offers == 0:
+            return f"""[STAGE: NURTURE — первое предложение]
+
+Клиент пока не готов.
+
+ФОРМАТ ОТВЕТА:
+"Понял. Могу прислать чек-лист по автоматизации заявок — пригодится когда тема станет актуальной.
+Куда удобнее: сюда или на почту?"
+"""
+        else:
+            return f"""[STAGE: NURTURE — завершение]
+
+ФОРМАТ ОТВЕТА:
+"Хорошо, если появятся вопросы — пишите сюда. Удачи!"
+"""
+
+    async def _call_llm_for_stage(
+        self,
+        user_prompt: str,
+        context: TwoLayerContext,
+        stage: str,
+        model: str,
+        user_message: str = ""
+    ) -> str:
+        """
+        Вызов LLM для конкретной стадии с ЗАЩИТОЙ ОТ ДОПРОСА.
+
+        Логика:
+        1. Добавляем в промпт информацию о clarification_attempts
+        2. После получения ответа проверяем — это уточняющий вопрос?
+        3. Если да и attempts >= 2 — перегенерируем с force_move_prompt
+        """
+        try:
+            system_prompt = self.get_ai_seller_prompt()
+
+            # Формируем историю сообщений (последние 10)
+            messages = []
+            for msg in context.message_history[-10:]:
+                messages.append({
+                    "role": msg.get("role", "user"),
+                    "content": msg.get("content", "")
+                })
+
+            # === ANTI-INTERROGATION: Добавляем инструкцию в промпт ===
+            clarification_instruction = get_simplified_prompt_instruction(context.clarification_attempts)
+            if clarification_instruction:
+                user_prompt = f"{clarification_instruction}\n\n{user_prompt}"
+
+            # Добавляем информацию о счётчике в промпт
+            user_prompt += f"\n\n[CLARIFICATION_ATTEMPTS: {context.clarification_attempts}]"
+
+            messages.append({"role": "user", "content": user_prompt})
+
+            # Контекст для оркестратора
+            llm_context = {
+                "chat_id": context.chat_id,
+                "stage": stage,
+                "leads_per_month": context.slots.get("leads_per_month"),
+                "niche": context.slots.get("niche"),
+                "clarification_attempts": context.clarification_attempts,
+            }
+
+            # Вызываем LLM с выбранной моделью
+            response = await llm_generate_response(
+                mode=stage.lower(),
+                context=llm_context,
+                messages=messages,
+                system_prompt=system_prompt,
+                model_override=model
+            )
+
+            # === POST-PROCESSING: Проверяем ответ на уточняющие вопросы ===
+            response = await self._post_process_clarification(
+                response, context, stage, model, user_message
+            )
+
+            return response
+
+        except Exception as e:
+            logger.error(f"LLM error in stage {stage}: {e}", exc_info=True)
+            return "Извините, возникла техническая ошибка. Можете повторить?"
+
+    async def _post_process_clarification(
+        self,
+        response: str,
+        context: TwoLayerContext,
+        stage: str,
+        model: str,
+        user_message: str
+    ) -> str:
+        """
+        Пост-обработка LLM ответа для защиты от допроса.
+
+        Правила:
+        - Если ответ НЕ уточняющий вопрос → сбрасываем счётчик, возвращаем как есть
+        - Если уточняющий и attempts == 0 → разрешаем, attempts = 1
+        - Если уточняющий и attempts == 1 → разрешаем, attempts = 2
+        - Если уточняющий и attempts >= 2 → ЗАПРЕЩАЕМ, перегенерируем
+        """
+        is_clarification = is_clarification_question(response)
+
+        logger.info(
+            f"Anti-interrogation check: is_clarification={is_clarification}, "
+            f"attempts={context.clarification_attempts}, stage={stage}"
+        )
+
+        # Если это НЕ уточняющий вопрос — сбрасываем счётчик
+        if not is_clarification:
+            if context.clarification_attempts > 0:
+                logger.info(f"Clarification counter reset (was {context.clarification_attempts})")
+            context.clarification_attempts = 0
+            context.last_clarification_topic = ""
+            return response
+
+        # Это УТОЧНЯЮЩИЙ вопрос
+        current_attempts = context.clarification_attempts
+
+        if current_attempts == 0:
+            # Первый уточняющий вопрос — разрешаем
+            context.clarification_attempts = 1
+            context.last_clarification_topic = user_message[:50] if user_message else "generic"
+            logger.info(f"First clarification question allowed, topic={context.last_clarification_topic}")
+            return response
+
+        elif current_attempts == 1:
+            # Второй уточняющий вопрос — разрешаем, но фиксируем
+            context.clarification_attempts = 2
+            logger.info("Second clarification question allowed (simplified expected)")
+            return response
+
+        else:
+            # ТРЕТИЙ+ уточняющий вопрос — ЗАПРЕЩЕНО!
+            logger.warning(
+                f"BLOCKING third clarification question! Forcing move forward. "
+                f"Blocked response: {response[:100]}..."
+            )
+
+            # Перегенерируем с force_move_prompt
+            force_prompt = get_force_move_prompt(context, user_message)
+            new_response = await self._regenerate_without_clarification(
+                force_prompt, context, stage, model
+            )
+
+            # Сбрасываем счётчик после принудительного перехода
+            context.clarification_attempts = 0
+            context.last_clarification_topic = ""
+
+            return new_response
+
+    async def _regenerate_without_clarification(
+        self,
+        force_prompt: str,
+        context: TwoLayerContext,
+        stage: str,
+        model: str
+    ) -> str:
+        """
+        Перегенерировать ответ с явным запретом уточняющих вопросов.
+        """
+        try:
+            system_prompt = self.get_ai_seller_prompt()
+
+            messages = []
+            for msg in context.message_history[-10:]:
+                messages.append({
+                    "role": msg.get("role", "user"),
+                    "content": msg.get("content", "")
+                })
+
+            messages.append({"role": "user", "content": force_prompt})
+
+            llm_context = {
+                "chat_id": context.chat_id,
+                "stage": stage,
+                "force_no_clarification": True,
+            }
+
+            response = await llm_generate_response(
+                mode=stage.lower(),
+                context=llm_context,
+                messages=messages,
+                system_prompt=system_prompt,
+                model_override=model
+            )
+
+            logger.info(f"Regenerated response without clarification: {response[:100]}...")
+
+            # Проверяем что новый ответ не содержит уточнений
+            if is_clarification_question(response):
+                # Если всё ещё уточняющий — даём fallback
+                logger.warning("Regenerated response still contains clarification! Using fallback.")
+                return (
+                    "Понял вас. Давайте я расскажу, как наш бот может помочь в вашей ситуации. "
+                    "Он автоматически обрабатывает заявки и собирает нужную информацию. "
+                    "Интересно посмотреть, как это работает на практике?"
+                )
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error regenerating response: {e}", exc_info=True)
+            return (
+                "Понял. Давайте я покажу, как бот решает подобные задачи — "
+                "он собирает информацию от клиентов автоматически. "
+                "Хотите посмотреть пример?"
+            )
+
+    # ===== LEGACY METHODS (для обратной совместимости) =====
+
+    async def _process_prebot(
+        self,
+        message: str,
+        context: TwoLayerContext
+    ) -> str:
+        """Legacy: Обработка скриптовым pre-bot"""
+        return await self._process_prebot_fsm(message, context)
 
     async def _process_ai_seller(
         self,
@@ -468,6 +1111,36 @@ class TwoLayerFlowManager:
         # Извлекаем бюджет если есть
         self._extract_budget(message, context)
 
+        # --- Проверяем, спрашивает ли клиент о цене ---
+        if is_price_question(message):
+            context.user_asked_price_recently = True
+            logger.info("Price question detected — user_asked_price_recently = True")
+
+        # --- Проверяем, ответил ли клиент на вопрос о проблеме ---
+        if not context.problem_clarified and len(context.message_history) >= 2:
+            # Берём предпоследнее сообщение (последний вопрос бота)
+            last_bot_msg = None
+            for msg in reversed(context.message_history[:-1]):
+                if msg.get("role") == "assistant":
+                    last_bot_msg = msg.get("content", "").lower()
+                    break
+            
+            if last_bot_msg:
+                # Проверяем признаки вопроса о сложностях
+                problem_keywords = ["сложност", "проблем", "болит", "труднее всего", "больше всего мешает", "главная боль"]
+                asked_about_problem = any(kw in last_bot_msg for kw in problem_keywords)
+                
+                # Проверяем что клиент дал содержательный ответ
+                msg_lower = message.lower()
+                is_meaningful = (
+                    len(message.strip()) > 10 and
+                    not any(skip in msg_lower for skip in ["не знаю", "незнаю", "хз", "не могу сказать"])
+                )
+                
+                if asked_about_problem and is_meaningful:
+                    context.problem_clarified = True
+                    logger.info("Problem clarified - client answered about main difficulty")
+
         # --- ВАЖНО: Проверяем контактные данные в любой момент ---
         # Если клиент присылает контакт (@username, телефон) — закрываем диалог
         contact = extract_contact(message)
@@ -476,6 +1149,9 @@ class TwoLayerFlowManager:
             context.contact_captured = True
             context.conversation_stage = "closed"
             logger.info(f"Contact detected in ai_seller: {context.client_contact}, stage -> closed")
+
+            # Сохраняем заявку
+            await self._save_lead(context, source="telegram")
 
             # Формируем финальный ответ
             time_info = ""
@@ -536,6 +1212,16 @@ class TwoLayerFlowManager:
         if mode == "main_pitch":
             context.has_main_pitch = True
             context.conversation_stage = "ai_seller"
+
+        # После ответа на возражение по цене — ставим флаг
+        if mode == "price_objection":
+            context.roi_explained = True
+            logger.info("ROI explained — roi_explained = True")
+
+        # Инкрементируем счётчик followup (для предотвращения допроса)
+        if mode == "followup":
+            context.followup_count += 1
+            logger.info(f"Followup count incremented to {context.followup_count}")
 
         # Режим closing — сразу переходим на стадию ожидания времени
         # (не зависим от парсинга текста ответа)
@@ -668,6 +1354,9 @@ class TwoLayerFlowManager:
             context.conversation_stage = "closed"
             logger.info(f"Contact received: {context.client_contact}, stage -> closed")
 
+            # Сохраняем заявку
+            await self._save_lead(context, source="telegram")
+
             # Формируем подтверждение с учётом собранной информации
             time_parts = []
             if context.preferred_period:
@@ -708,6 +1397,9 @@ class TwoLayerFlowManager:
         Приоритет (важен!):
             1. main_pitch - первый главный ответ (ещё не было питча)
             2. closing - готовность к следующему шагу (ВЫШЕ возражений!)
+               - явный сигнал (давайте созвонимся)
+               - положительное подтверждение после main_pitch (да, бывает, важно)
+               - достигнут лимит followup (2 вопроса = хватит допроса)
             3. price_objection - возражение по цене
             4. timing_objection - не сейчас, позже
             5. competitor_objection - у нас уже есть бот/подрядчик
@@ -722,7 +1414,19 @@ class TwoLayerFlowManager:
         # 2. СНАЧАЛА проверяем closing (до возражений!)
         # Это важно: "давайте созвонимся" должно быть closing, даже если есть слово "дорого"
         if is_closing_signal(message):
-            logger.debug("Mode: closing (ready for next step)")
+            logger.debug("Mode: closing (explicit closing signal)")
+            return "closing"
+
+        # 2b. Положительное подтверждение после main_pitch = переходим к closing
+        # "да", "бывает", "важно", "иногда" — клиент подтвердил интерес
+        if is_positive_confirmation(message):
+            logger.info(f"Mode: closing (positive confirmation after {context.followup_count} followups)")
+            return "closing"
+
+        # 2c. Лимит followup достигнут — хватит допроса, переходим к closing
+        # Максимум 2 followup-сообщения, потом закрываем
+        if context.followup_count >= 2:
+            logger.info(f"Mode: closing (followup limit reached: {context.followup_count})")
             return "closing"
 
         # 3. Возражения по приоритету
@@ -752,7 +1456,7 @@ class TwoLayerFlowManager:
                 return "not_fit_small_leads"
 
         # 5. Все остальные случаи — followup
-        logger.debug("Mode: followup (default)")
+        logger.debug(f"Mode: followup (count={context.followup_count})")
         return "followup"
 
     def _extract_budget(self, message: str, context: TwoLayerContext):
@@ -887,15 +1591,33 @@ class TwoLayerFlowManager:
 5. После получения контакта — подтверди и заверши
 """
         elif mode == "main_pitch":
-            mode_instruction = "[MODE: main_pitch]\n"
+            mode_instruction = """[MODE: main_pitch]
+ЗАДАЧА: Резюме ситуации → Выведенная боль → Решение → Мягкий вопрос.
+ЗАПРЕЩЕНО: спрашивать "какие сложности?", называть цены, предлагать созвон.
+Следуй скрипту из системного промпта. 4-5 предложений максимум.
+"""
         else:
             mode_instruction = """[MODE: followup]
-Отвечай по существу вопроса клиента.
-НЕ начинай заново презентацию.
-Коротко, по делу. Один вопрос за раз.
+Отреагируй на ответ клиента. НЕ задавай новый вопрос — сначала дай ценность.
+Если клиент подтвердил ("да", "бывает") — предложи посмотреть, как работает.
+Если нейтрально — кратко покажи пользу и дай выбор.
+Коротко, 2-3 предложения.
+"""
+
+        # Проверяем флаг problem_clarified
+        problem_clarified_warning = ""
+        if context.problem_clarified:
+            problem_clarified_warning = "ВАЖНО: Клиент УЖЕ назвал главную проблему. НЕ переспрашивай про сложности.\n"
+
+        # Формируем блок флагов для LLM
+        flags_block = f"""[ФЛАГИ]
+USER_ASKED_PRICE_RECENTLY: {context.user_asked_price_recently}
+ROI_EXPLAINED: {context.roi_explained}
 """
 
         user_prompt = f"""{mode_instruction}
+{problem_clarified_warning}
+{flags_block}
 Данные о клиенте:
 {slots_summary}
 
@@ -1008,6 +1730,147 @@ class TwoLayerFlowManager:
             logger.info(f"Message sent to {chat_id}", update_id=update_id)
         except Exception as e:
             logger.error(f"Error sending message: {e}")
+
+    async def _save_lead(
+        self,
+        context: TwoLayerContext,
+        source: str = "telegram"
+    ):
+        """Сохранить заявку в единое хранилище"""
+        try:
+            from services.leads_storage import get_leads_storage, Lead, detect_contact_type
+
+            storage = await get_leads_storage()
+
+            # Определяем тип контакта
+            contact_type = detect_contact_type(context.client_contact)
+
+            # Собираем данные из слотов
+            name = context.slots.get("name", "Неизвестно")
+            niche = context.slots.get("niche", "")
+            leads_per_month = context.slots.get("leads_per_month")
+            pain = context.slots.get("pain", "")
+
+            # Формируем сообщение с дополнительной информацией
+            message_parts = []
+            if niche:
+                message_parts.append(f"Ниша: {niche}")
+            if leads_per_month:
+                message_parts.append(f"Заявок в месяц: {leads_per_month}")
+            if pain:
+                message_parts.append(f"Боль: {pain}")
+            if context.preferred_period:
+                message_parts.append(f"Когда связаться: {context.preferred_period}")
+
+            lead = Lead(
+                id=0,
+                source=source,
+                name=name,
+                contact=context.client_contact,
+                contact_type=contact_type,
+                niche=niche,
+                leads_per_month=leads_per_month,
+                pain=pain,
+                message="\n".join(message_parts) if message_parts else None,
+                conversation_id=context.conversation_id
+            )
+
+            result = await storage.save_lead(lead)
+            logger.info(f"Lead saved from {source}: {result}")
+
+        except Exception as e:
+            logger.error(f"Error saving lead: {e}", exc_info=True)
+
+
+    async def process_web_message(
+        self,
+        session_id: str,
+        message_text: str
+    ) -> Dict[str, Any]:
+        """
+        Обработать сообщение из веб-чата (FSM-архитектура).
+
+        Args:
+            session_id: Уникальный ID сессии веб-чата
+            message_text: Текст сообщения от пользователя
+
+        Returns:
+            Dict с response (текст ответа бота) и metadata
+        """
+        # Генерируем fake chat_id из session_id (используем hash)
+        import hashlib
+        chat_id = int(hashlib.sha256(session_id.encode()).hexdigest()[:12], 16)
+
+        try:
+            # Загружаем контекст (тот же Redis key, что и для Telegram)
+            context = await self.get_context(chat_id)
+            context.user_id = chat_id
+            context.total_message_count += 1
+            context.last_message_at = time.time()
+
+            # Сохраняем сообщение пользователя
+            context.message_history.append({
+                "role": "user",
+                "content": message_text
+            })
+
+            # Log message
+            self.conv_db.save_message(
+                conversation_id=context.conversation_id,
+                role="user",
+                content=message_text
+            )
+
+            # ===== FSM ROUTING (идентично Telegram) =====
+            current_stage = context.stage
+            logger.info(f"FSM Web: Processing message, current_stage={current_stage}")
+
+            # PREBOT — скриптовый сбор слотов
+            if current_stage == "PREBOT":
+                response = await self._process_prebot_fsm(message_text, context)
+
+            # DIAG_Q — диагностические вопросы (без LLM)
+            elif current_stage == "DIAG_Q":
+                response = await self._process_diag_q(message_text, context)
+
+            # CLOSED — диалог завершён
+            elif current_stage == "CLOSED":
+                response = await self._process_closed_fsm(message_text, context)
+
+            # LLM-стадии
+            else:
+                response = await self._process_llm_stage(message_text, context)
+
+            # Сохраняем ответ бота
+            if response:
+                context.message_history.append({
+                    "role": "assistant",
+                    "content": response
+                })
+
+                self.conv_db.save_message(
+                    conversation_id=context.conversation_id,
+                    role="assistant",
+                    content=response
+                )
+
+            # Сохраняем контекст
+            await self.save_context(context)
+
+            return {
+                "status": "ok",
+                "response": response or "",
+                "stage": context.stage,
+                "conversation_id": context.conversation_id
+            }
+
+        except Exception as e:
+            logger.error(f"Error processing web message: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "response": "Извините, произошла ошибка. Попробуйте ещё раз.",
+                "error": str(e)
+            }
 
 
 # Глобальный инстанс

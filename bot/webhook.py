@@ -44,6 +44,24 @@ from llm.orchestrator import get_orchestrator
 from dialog.flow_router import get_flow_manager  # Router to select flow manager by domain
 from adapters.crm_adapter import get_crm_adapter
 
+# AmoCRM/Kommo OAuth and Widget API
+try:
+    from services.amocrm_oauth import router as amocrm_oauth_router
+    from services.widget_api_v2 import router as widget_api_router
+try:
+    from services.licensing import router as licensing_router
+    from services.payment import router as payment_router
+    PAYMENT_ROUTERS_AVAILABLE = True
+except ImportError as e:
+    PAYMENT_ROUTERS_AVAILABLE = False
+    licensing_router = None
+    payment_router = None
+    AMOCRM_ROUTERS_AVAILABLE = True
+except ImportError as e:
+    AMOCRM_ROUTERS_AVAILABLE = False
+    amocrm_oauth_router = None
+    widget_api_router = None
+
 logger = get_logger(__name__)
 
 # Безопасный импорт middleware с fallback
@@ -371,14 +389,38 @@ if setup_middlewares is not None:
 else:
     logger.warning("ratelimit_disabled_fallback")
 
-# CORS middleware
+# CORS middleware - настроено для продакшена
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В продакшене ограничить
+    allow_origins=[
+        "https://saleswhisper.pro",
+        "https://www.saleswhisper.pro",
+        "http://localhost:3000",  # для локальной разработки
+    ],
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Account-Id"],
 )
+
+# Register AmoCRM/Kommo routers
+if AMOCRM_ROUTERS_AVAILABLE:
+    if amocrm_oauth_router:
+        app.include_router(amocrm_oauth_router, prefix="/api")
+        logger.info("AmoCRM OAuth router registered at /api/amocrm")
+    if widget_api_router:
+        app.include_router(widget_api_router, prefix="/api")
+        logger.info("Widget API v2 router registered at /api/widget")
+
+# Register Licensing and Payment routers
+if PAYMENT_ROUTERS_AVAILABLE:
+    if licensing_router:
+        app.include_router(licensing_router, prefix="/api")
+        logger.info("Licensing router registered at /api/license")
+    if payment_router:
+        app.include_router(payment_router, prefix="/api")
+        logger.info("Payment router registered at /api/payment")
+else:
+    logger.warning("AmoCRM routers not available - services not imported")
 
 
 @app.get("/healthz")
@@ -393,6 +435,187 @@ async def health_check_alias():
     return {"status": "healthy", "service": "telegram-webhook"}
     
     
+class WebChatRequest(BaseModel):
+    """Запрос веб-чата"""
+    message: str
+    session_id: Optional[str] = None
+
+
+class WebChatResponse(BaseModel):
+    """Ответ веб-чата"""
+    response: str
+    session_id: str
+    status: str = "ok"
+
+
+@app.post("/api/chat")
+async def web_chat(request: WebChatRequest):
+    """
+    API эндпоинт для веб-чата.
+
+    Обрабатывает сообщения из виджета на сайте через AI Seller.
+    """
+    import uuid
+    from dialog.two_layer_flow_manager import get_two_layer_flow_manager
+
+    # Генерируем session_id если не передан
+    session_id = request.session_id or f"web_{uuid.uuid4().hex[:16]}"
+
+    logger.info(f"Web chat request: session={session_id}, message='{request.message[:50]}...'")
+
+    try:
+        # Получаем flow manager
+        flow_manager = get_two_layer_flow_manager()
+
+        # Обрабатываем сообщение
+        result = await flow_manager.process_web_message(
+            session_id=session_id,
+            message_text=request.message
+        )
+
+        return WebChatResponse(
+            response=result.get("response", ""),
+            session_id=session_id,
+            status=result.get("status", "ok")
+        )
+
+    except Exception as e:
+        logger.error(f"Web chat error: {e}", exc_info=True)
+        return WebChatResponse(
+            response="Произошла ошибка. Попробуйте позже или напишите нам в Telegram.",
+            session_id=session_id,
+            status="error"
+        )
+
+
+# ============================================
+# Leads API - Единое хранилище заявок
+# ============================================
+
+class LeadSubmitRequest(BaseModel):
+    """Запрос на создание заявки"""
+    name: str
+    contact: str  # телефон, email или telegram
+    message: Optional[str] = None
+    source: str = "website_form"
+    niche: Optional[str] = None
+    session_id: Optional[str] = None
+
+
+class LeadResponse(BaseModel):
+    """Ответ API заявок"""
+    status: str
+    lead_id: Optional[int] = None
+    message: Optional[str] = None
+
+
+@app.post("/api/leads")
+async def submit_lead(request: LeadSubmitRequest):
+    """
+    API для создания заявки.
+
+    Принимает заявки с сайта, виджета, формы.
+    """
+    from services.leads_storage import get_leads_storage, Lead, detect_contact_type
+
+    logger.info(f"Lead submission: source={request.source}, name={request.name}")
+
+    try:
+        storage = await get_leads_storage()
+
+        # Определяем тип контакта
+        contact_type = detect_contact_type(request.contact)
+
+        # Создаём заявку
+        lead = Lead(
+            id=0,  # будет присвоен автоматически
+            source=request.source,
+            name=request.name,
+            contact=request.contact,
+            contact_type=contact_type,
+            niche=request.niche,
+            message=request.message,
+            session_id=request.session_id
+        )
+
+        result = await storage.save_lead(lead)
+
+        if result["status"] == "success":
+            return LeadResponse(
+                status="success",
+                lead_id=result["lead_id"],
+                message="Заявка успешно отправлена! Мы свяжемся с вами в ближайшее время."
+            )
+        else:
+            return LeadResponse(
+                status="error",
+                message="Произошла ошибка при сохранении заявки."
+            )
+
+    except Exception as e:
+        logger.error(f"Lead submission error: {e}", exc_info=True)
+        return LeadResponse(
+            status="error",
+            message="Произошла ошибка. Попробуйте позже."
+        )
+
+
+@app.get("/api/leads")
+async def get_leads(
+    source: Optional[str] = None,
+    limit: int = 100,
+    api_key: Optional[str] = None
+):
+    """
+    Получить список заявок (требует API ключ).
+    """
+    from services.leads_storage import get_leads_storage
+
+    # Простая проверка API ключа
+    expected_key = os.getenv("LEADS_API_KEY", "saleswhisper_admin_2025")
+    if api_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    try:
+        storage = await get_leads_storage()
+        leads = await storage.get_leads(source=source, limit=limit)
+
+        return {
+            "status": "success",
+            "count": len(leads),
+            "leads": leads
+        }
+
+    except Exception as e:
+        logger.error(f"Get leads error: {e}")
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
+@app.get("/api/leads/stats")
+async def get_leads_stats(api_key: Optional[str] = None):
+    """
+    Статистика по заявкам (требует API ключ).
+    """
+    from services.leads_storage import get_leads_storage
+
+    expected_key = os.getenv("LEADS_API_KEY", "saleswhisper_admin_2025")
+    if api_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    try:
+        storage = await get_leads_storage()
+        stats = await storage.get_stats()
+
+        return {
+            "status": "success",
+            "stats": stats
+        }
+
+    except Exception as e:
+        logger.error(f"Get stats error: {e}")
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
 @app.get("/readyz")
 async def readiness_check():
     """Readiness check эндпоинт с полной проверкой здоровья"""
