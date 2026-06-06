@@ -3,6 +3,7 @@ redis_session_store.py — временная in-memory реализация х�
 (В проде заменить на реальный Redis-клиент!)
 """
 
+
 class RedisSessionStore:
     def __init__(self, redis_url: str, ttl: int = 1800):
         # Вместо реального Redis — временное хранилище в памяти (dict)
@@ -17,7 +18,9 @@ class RedisSessionStore:
         ctx, version = data
         return ctx, version
 
-    async def set_with_version(self, session_id: str, ctx, version: int, reset_ttl: bool = False):
+    async def set_with_version(
+        self, session_id: str, ctx, version: int, reset_ttl: bool = False
+    ):
         # Оптимистичная блокировка: обновляем только если версия совпала
         existing = self._storage.get(session_id)
         current_version = existing[1] if existing else 0
@@ -29,4 +32,3 @@ class RedisSessionStore:
     async def delete(self, session_id: str):
         if session_id in self._storage:
             del self._storage[session_id]
-

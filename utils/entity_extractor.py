@@ -31,13 +31,16 @@ def extract_lead_info(text: str) -> Dict[str, str]:
         "tech_spec": None,
         "patterns": None,
         "material": None,
-        "material_known": None
+        "material_known": None,
     }
 
     text_lower = text.lower()
 
     # --- Продукт
-    product_match = re.search(r"(пижам[аиы]|футболк[аиы]|лонгслив[аиы]|шорт[ыа]|брюк[иа]|свитшот[ыа])", text_lower)
+    product_match = re.search(
+        r"(пижам[аиы]|футболк[аиы]|лонгслив[аиы]|шорт[ыа]|брюк[иа]|свитшот[ыа])",
+        text_lower,
+    )
     if product_match:
         result["product"] = product_match.group(1)
 
@@ -62,8 +65,21 @@ def extract_lead_info(text: str) -> Dict[str, str]:
 
     # --- Материалы (по ключевым словам)
     material_keywords = [
-        "кулир", "футер", "интерлок", "рибана", "вискоза", "хлопок", "полиэстер", "эластан",
-        "бифлекс", "трикотаж", "ситец", "поплин", "ткань", "материал", "трикотажный"
+        "кулир",
+        "футер",
+        "интерлок",
+        "рибана",
+        "вискоза",
+        "хлопок",
+        "полиэстер",
+        "эластан",
+        "бифлекс",
+        "трикотаж",
+        "ситец",
+        "поплин",
+        "ткань",
+        "материал",
+        "трикотажный",
     ]
     for word in material_keywords:
         if word in text_lower:
@@ -76,4 +92,3 @@ def extract_lead_info(text: str) -> Dict[str, str]:
             result["material_known"] = False
 
     return result
-

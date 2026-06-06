@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import json
 import logging
@@ -7,6 +6,7 @@ from redis.asyncio import Redis, ConnectionPool
 
 logger = logging.getLogger("llm.cache")
 logger.setLevel(logging.INFO)
+
 
 class SecureCacheManager:
     """
@@ -20,12 +20,10 @@ class SecureCacheManager:
         default_ttl: int = 3600,
         max_connections: int = 10,
         serializer: Callable = json.dumps,
-        deserializer: Callable = json.loads
+        deserializer: Callable = json.loads,
     ):
         self.pool = ConnectionPool.from_url(
-            redis_url,
-            max_connections=max_connections,
-            decode_responses=True
+            redis_url, max_connections=max_connections, decode_responses=True
         )
         self.prefix = prefix
         self.default_ttl = default_ttl
@@ -80,4 +78,3 @@ class SecureCacheManager:
             await redis.delete(key)
         except Exception as e:
             logger.error(f"Ошибка инвалидации кэша: {e}")
-

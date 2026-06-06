@@ -14,13 +14,14 @@ from pathlib import Path
 
 class ConversationOutcome(str, Enum):
     """Результат диалога"""
+
     IN_PROGRESS = "in_progress"
-    SUCCESS = "success"                 # Лид закрыт, контакты получены
+    SUCCESS = "success"  # Лид закрыт, контакты получены
     FAIL_DISQUALIFIED = "fail_disqualified"  # Не подошел по критериям
-    FAIL_NO_RESPONSE = "fail_no_response"    # Клиент перестал отвечать
-    FAIL_OBJECTION = "fail_objection"        # Не закрыли возражение
-    FAIL_NO_BUDGET = "fail_no_budget"        # Нет бюджета
-    FAIL_OTHER = "fail_other"                # Другая причина
+    FAIL_NO_RESPONSE = "fail_no_response"  # Клиент перестал отвечать
+    FAIL_OBJECTION = "fail_objection"  # Не закрыли возражение
+    FAIL_NO_BUDGET = "fail_no_budget"  # Нет бюджета
+    FAIL_OTHER = "fail_other"  # Другая причина
 
 
 @dataclass
@@ -37,8 +38,8 @@ class LeadAttributes:
     budget_range: Optional[str] = None
 
     # Сегментация
-    client_segment: Optional[str] = None    # fast_decision, thinker, price_sensitive
-    source_channel: str = "telegram"         # telegram, whatsapp, web
+    client_segment: Optional[str] = None  # fast_decision, thinker, price_sensitive
+    source_channel: str = "telegram"  # telegram, whatsapp, web
 
     # Поведенческие признаки
     avg_response_time_sec: Optional[float] = None
@@ -52,16 +53,16 @@ class LeadAttributes:
     sentiment_trajectory: List[float] = field(default_factory=list)
 
     # Путь по воронке
-    reached_stage: Optional[str] = None     # QUALIFY, DIAGNOSE, DEMO, OFFER, CLOSE
+    reached_stage: Optional[str] = None  # QUALIFY, DIAGNOSE, DEMO, OFFER, CLOSE
     dropped_at_stage: Optional[str] = None
 
     # Результат
     outcome: ConversationOutcome = ConversationOutcome.IN_PROGRESS
-    outcome_reason: Optional[str] = None    # Детальная причина провала
+    outcome_reason: Optional[str] = None  # Детальная причина провала
 
     # Эксперимент (если есть A/B тест)
     experiment_id: Optional[str] = None
-    variant: Optional[str] = None           # A или B
+    variant: Optional[str] = None  # A или B
 
     # Ценность
     deal_value: Optional[float] = None
@@ -77,7 +78,7 @@ class ConversationLog:
     user_id: int
 
     # Domain
-    domain: str                             # textile_manufacturing, ai_seller_self
+    domain: str  # textile_manufacturing, ai_seller_self
 
     # Lifecycle
     started_at: float
@@ -120,7 +121,8 @@ class ConversationDB:
         self.conn.row_factory = sqlite3.Row
 
         # Conversations table
-        self.conn.execute("""
+        self.conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS conversations (
                 conversation_id TEXT PRIMARY KEY,
                 chat_id INTEGER NOT NULL,
@@ -146,10 +148,12 @@ class ConversationDB:
                 created_at REAL DEFAULT (julianday('now')),
                 updated_at REAL DEFAULT (julianday('now'))
             )
-        """)
+        """
+        )
 
         # Messages table
-        self.conn.execute("""
+        self.conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 conversation_id TEXT NOT NULL,
@@ -167,10 +171,12 @@ class ConversationDB:
 
                 FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id)
             )
-        """)
+        """
+        )
 
         # States history
-        self.conn.execute("""
+        self.conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS state_transitions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 conversation_id TEXT NOT NULL,
@@ -183,10 +189,12 @@ class ConversationDB:
 
                 FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id)
             )
-        """)
+        """
+        )
 
         # Events
-        self.conn.execute("""
+        self.conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS conversation_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 conversation_id TEXT NOT NULL,
@@ -198,10 +206,12 @@ class ConversationDB:
 
                 FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id)
             )
-        """)
+        """
+        )
 
         # Outcome feedback (from /result command)
-        self.conn.execute("""
+        self.conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS outcome_feedback (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 conversation_id TEXT NOT NULL,
@@ -216,23 +226,30 @@ class ConversationDB:
 
                 FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id)
             )
-        """)
+        """
+        )
 
         # Create indexes
-        self.conn.execute("""
+        self.conn.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_conv_domain
             ON conversations(domain)
-        """)
+        """
+        )
 
-        self.conn.execute("""
+        self.conn.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_conv_outcome
             ON conversations(outcome)
-        """)
+        """
+        )
 
-        self.conn.execute("""
+        self.conn.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_msg_conv
             ON messages(conversation_id)
-        """)
+        """
+        )
 
         self.conn.commit()
 
@@ -240,7 +257,8 @@ class ConversationDB:
         """Save or update conversation"""
         lead_attrs_json = json.dumps(asdict(conv.lead_attrs))
 
-        self.conn.execute("""
+        self.conn.execute(
+            """
             INSERT OR REPLACE INTO conversations (
                 conversation_id, chat_id, user_id, domain,
                 started_at, last_message_at, completed_at,
@@ -248,96 +266,141 @@ class ConversationDB:
                 lead_attrs, outcome, outcome_reason,
                 updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, julianday('now'))
-        """, (
-            conv.conversation_id,
-            conv.chat_id,
-            conv.user_id,
-            conv.domain,
-            conv.started_at,
-            conv.last_message_at,
-            conv.completed_at,
-            conv.message_count,
-            conv.current_state,
-            lead_attrs_json,
-            conv.outcome.value,
-            conv.lead_attrs.outcome_reason
-        ))
+        """,
+            (
+                conv.conversation_id,
+                conv.chat_id,
+                conv.user_id,
+                conv.domain,
+                conv.started_at,
+                conv.last_message_at,
+                conv.completed_at,
+                conv.message_count,
+                conv.current_state,
+                lead_attrs_json,
+                conv.outcome.value,
+                conv.lead_attrs.outcome_reason,
+            ),
+        )
 
         self.conn.commit()
 
-    def save_message(self, conversation_id: str, role: str, content: str,
-                    sentiment: Optional[float] = None,
-                    intent: Optional[str] = None):
+    def save_message(
+        self,
+        conversation_id: str,
+        role: str,
+        content: str,
+        sentiment: Optional[float] = None,
+        intent: Optional[str] = None,
+    ):
         """Save message"""
         # Get current message index
-        cursor = self.conn.execute("""
+        cursor = self.conn.execute(
+            """
             SELECT MAX(message_index) as max_idx
             FROM messages
             WHERE conversation_id = ?
-        """, (conversation_id,))
+        """,
+            (conversation_id,),
+        )
 
         row = cursor.fetchone()
-        next_idx = (row['max_idx'] or 0) + 1
+        next_idx = (row["max_idx"] or 0) + 1
 
-        self.conn.execute("""
+        self.conn.execute(
+            """
             INSERT INTO messages (
                 conversation_id, role, content, message_index,
                 timestamp, sentiment, intent
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            conversation_id,
-            role,
-            content,
-            next_idx,
-            time.time(),
-            sentiment,
-            intent
-        ))
+        """,
+            (conversation_id, role, content, next_idx, time.time(), sentiment, intent),
+        )
 
         self.conn.commit()
 
-    def save_state_transition(self, conversation_id: str,
-                            from_state: Optional[str],
-                            to_state: str,
-                            trigger: Optional[str] = None):
+    def save_state_transition(
+        self,
+        conversation_id: str,
+        from_state: Optional[str],
+        to_state: str,
+        trigger: Optional[str] = None,
+    ):
         """Save state transition"""
-        self.conn.execute("""
+        self.conn.execute(
+            """
             INSERT INTO state_transitions (
                 conversation_id, from_state, to_state, trigger, timestamp
             ) VALUES (?, ?, ?, ?, ?)
-        """, (
-            conversation_id,
-            from_state,
-            to_state,
-            trigger,
-            time.time()
-        ))
+        """,
+            (conversation_id, from_state, to_state, trigger, time.time()),
+        )
 
         self.conn.commit()
 
-    def save_event(self, conversation_id: str, event_type: str,
-                  event_data: Optional[Dict] = None):
+    def save_event(
+        self, conversation_id: str, event_type: str, event_data: Optional[Dict] = None
+    ):
         """Save event"""
         event_data_json = json.dumps(event_data) if event_data else None
 
-        self.conn.execute("""
+        self.conn.execute(
+            """
             INSERT INTO conversation_events (
                 conversation_id, event_type, event_data, timestamp
             ) VALUES (?, ?, ?, ?)
-        """, (
-            conversation_id,
-            event_type,
-            event_data_json,
-            time.time()
-        ))
+        """,
+            (conversation_id, event_type, event_data_json, time.time()),
+        )
 
         self.conn.commit()
 
-    def save_outcome_feedback(self, conversation_id: str,
-                             outcome: str,
-                             reason: Optional[str] = None,
-                             feedback_by: str = "admin",
-                             notes: Optional[str] = None):
+    def get_last_selected_variant(self, conversation_id: str) -> Optional[Dict[str, str]]:
+        """
+        Получить последний выбранный вариантом обучения ответ для диалога.
+
+        Возвращает:
+            {"variant_id": "...", "variant_context": "..."} или None
+        """
+        cursor = self.conn.execute(
+            """
+            SELECT event_data
+            FROM conversation_events
+            WHERE conversation_id = ?
+              AND event_type = 'variant_selected'
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """,
+            (conversation_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        raw_data = row["event_data"]
+        if not raw_data:
+            return None
+
+        try:
+            payload = json.loads(raw_data)
+        except Exception:
+            return None
+
+        variant_id = payload.get("variant_id")
+        variant_context = payload.get("variant_context")
+        if not variant_id or not variant_context:
+            return None
+
+        return {"variant_id": str(variant_id), "variant_context": str(variant_context)}
+
+    def save_outcome_feedback(
+        self,
+        conversation_id: str,
+        outcome: str,
+        reason: Optional[str] = None,
+        feedback_by: str = "admin",
+        notes: Optional[str] = None,
+    ):
         """
         Save outcome feedback (from /result command)
 
@@ -348,45 +411,48 @@ class ConversationDB:
             feedback_by: Who provided feedback
             notes: Additional notes
         """
-        self.conn.execute("""
+        self.conn.execute(
+            """
             INSERT INTO outcome_feedback (
                 conversation_id, outcome, reason,
                 feedback_by, feedback_at, notes
             ) VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            conversation_id,
-            outcome,
-            reason,
-            feedback_by,
-            time.time(),
-            notes
-        ))
+        """,
+            (conversation_id, outcome, reason, feedback_by, time.time(), notes),
+        )
 
         # Update conversation outcome
-        self.conn.execute("""
+        self.conn.execute(
+            """
             UPDATE conversations
             SET outcome = ?,
                 outcome_reason = ?,
                 updated_at = julianday('now')
             WHERE conversation_id = ?
-        """, (outcome, reason, conversation_id))
+        """,
+            (outcome, reason, conversation_id),
+        )
 
         self.conn.commit()
 
     def get_conversation(self, conversation_id: str) -> Optional[Dict]:
         """Get conversation by ID"""
-        cursor = self.conn.execute("""
+        cursor = self.conn.execute(
+            """
             SELECT * FROM conversations
             WHERE conversation_id = ?
-        """, (conversation_id,))
+        """,
+            (conversation_id,),
+        )
 
         row = cursor.fetchone()
         if row:
             return dict(row)
         return None
 
-    def get_successful_conversations(self, domain: Optional[str] = None,
-                                     limit: int = 100) -> List[Dict]:
+    def get_successful_conversations(
+        self, domain: Optional[str] = None, limit: int = 100
+    ) -> List[Dict]:
         """Get successful conversations for learning"""
         query = """
             SELECT * FROM conversations
@@ -404,9 +470,12 @@ class ConversationDB:
         cursor = self.conn.execute(query, params)
         return [dict(row) for row in cursor.fetchall()]
 
-    def get_failed_conversations(self, domain: Optional[str] = None,
-                                failure_reason: Optional[str] = None,
-                                limit: int = 100) -> List[Dict]:
+    def get_failed_conversations(
+        self,
+        domain: Optional[str] = None,
+        failure_reason: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict]:
         """Get failed conversations for analysis"""
         query = """
             SELECT * FROM conversations
@@ -448,9 +517,9 @@ class ConversationDB:
         cursor = self.conn.execute(query, params)
         stats = {}
         for row in cursor.fetchall():
-            stats[row['outcome']] = {
-                'count': row['count'],
-                'avg_messages': row['avg_messages']
+            stats[row["outcome"]] = {
+                "count": row["count"],
+                "avg_messages": row["avg_messages"],
             }
 
         return stats
@@ -484,7 +553,7 @@ if __name__ == "__main__":
         chat_id=12345,
         user_id=67890,
         domain="ai_seller_self",
-        started_at=time.time()
+        started_at=time.time(),
     )
 
     conv.lead_attrs.business_niche = "real_estate"

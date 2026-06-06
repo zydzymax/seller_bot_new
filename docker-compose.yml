@@ -16,7 +16,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/migrate_schema.sql:/docker-entrypoint-initdb.d/01_init.sql
     ports:
-      - "5433:5432"
+      - "5436:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sovani -d saleswhisper_ai_seller"]
       interval: 10s
@@ -34,9 +34,9 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "6380:6379"
+      - "6383:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]} ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -58,6 +58,10 @@ services:
       # API ключи
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LEADS_API_KEY=${LEADS_API_KEY}
+      - WIDGET_API_KEY=${WIDGET_API_KEY:-}
+      - WIDGET_REQUEST_SECRET=${WIDGET_REQUEST_SECRET:-}
+      - WIDGET_ALLOW_UNSIGNED_REQUESTS=${WIDGET_ALLOW_UNSIGNED_REQUESTS:-false}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
       
@@ -65,6 +69,7 @@ services:
       - POSTGRES_DSN=postgresql://sovani:${POSTGRES_PASSWORD:-[REVOKED_SECRET_REMOVED]}@postgres:5432/saleswhisper_ai_seller
       
       # Redis
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]}@saleswhisper_seller_redis:6379/0
       - REDIS_ADDR=redis://:${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]}@saleswhisper_seller_redis:6379/0
       - REDIS_PASSWORD=${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]}
       
@@ -72,16 +77,24 @@ services:
       - WEBHOOK_HOST=0.0.0.0
       - WEBHOOK_PORT=8000
       - WEBHOOK_SECRET_PATH=${WEBHOOK_SECRET_PATH:-SECRET}
+      - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}
+      - TELEGRAM_WEBHOOK_ALLOW_SECRET_PATH_ALIAS=${TELEGRAM_WEBHOOK_ALLOW_SECRET_PATH_ALIAS:-false}
       
       # CRM настройки
       - AMOCRM_DOMAIN=${AMOCRM_DOMAIN:-your-domain.amocrm.ru}
       - AMOCRM_API_TOKEN=${AMOCRM_API_TOKEN:-}
       - AMOCRM_USER_HASH=${AMOCRM_USER_HASH:-}
+      - AMOCRM_CLIENT_ID=${AMOCRM_CLIENT_ID:-}
+      - AMOCRM_CLIENT_SECRET=${AMOCRM_CLIENT_SECRET:-}
+      - AMOCRM_WIDGET_SECRET=${AMOCRM_WIDGET_SECRET:-}
+      - AMOCRM_TOKENS_PREFIX=${AMOCRM_TOKENS_PREFIX:-amocrm:oauth:tokens}
+      - AMOCRM_ALLOW_INSECURE_WEBHOOK=${AMOCRM_ALLOW_INSECURE_WEBHOOK:-false}
       
       # Rate Limiting
       - RATE_LIMIT_RPS=${RATE_LIMIT_RPS:-5}
       - RATE_LIMIT_BURST=${RATE_LIMIT_BURST:-10}
       - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-60}
+      - RATE_LIMIT_FAIL_OPEN=${RATE_LIMIT_FAIL_OPEN:-false}
       
       # Idempotency
       - IDEMPOTENCY_TTL=${IDEMPOTENCY_TTL:-3600}
@@ -105,6 +118,20 @@ services:
       - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-1000}
       - LLM_MAX_RETRIES=${LLM_MAX_RETRIES:-3}
       - LLM_TIMEOUT_SECONDS=${LLM_TIMEOUT_SECONDS:-30}
+      - TTS_MODEL=${TTS_MODEL:-gpt-4o-mini-tts}
+      - TTS_FALLBACK_MODEL=${TTS_FALLBACK_MODEL:-tts-1-hd}
+      - STT_MODEL=${STT_MODEL:-gpt-4o-mini-transcribe}
+      - STT_FALLBACK_MODEL=${STT_FALLBACK_MODEL:-whisper-1}
+      - AUDIO_SELFTEST_MONITOR_ENABLED=${AUDIO_SELFTEST_MONITOR_ENABLED:-true}
+      - AUDIO_SELFTEST_INTERVAL_SEC=${AUDIO_SELFTEST_INTERVAL_SEC:-900}
+      - AUDIO_SELFTEST_VOICE=${AUDIO_SELFTEST_VOICE:-nova}
+      - AUDIO_SELFTEST_QUIET_ENABLED=${AUDIO_SELFTEST_QUIET_ENABLED:-true}
+      - AUDIO_SELFTEST_QUIET_START_HOUR=${AUDIO_SELFTEST_QUIET_START_HOUR:-1}
+      - AUDIO_SELFTEST_QUIET_END_HOUR=${AUDIO_SELFTEST_QUIET_END_HOUR:-8}
+      - AUDIO_SELFTEST_QUIET_TZ=${AUDIO_SELFTEST_QUIET_TZ:-Europe/Moscow}
+      - AUDIO_MONITOR_PING_ALLOW_LOCAL_NO_KEY=${AUDIO_MONITOR_PING_ALLOW_LOCAL_NO_KEY:-true}
+      - PHOTO_VISION_ENABLED=${PHOTO_VISION_ENABLED:-true}
+      - PHOTO_VISION_MODEL=${PHOTO_VISION_MODEL:-gpt-4o-mini}
       
     volumes:
       # Логи
@@ -120,7 +147,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/healthz"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -181,7 +208,7 @@ services:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana:/etc/grafana/provisioning
     ports:
-      - "3000:3000"
+      - "3002:3000"
     restart: unless-stopped
     networks:
       - saleswhisper_network

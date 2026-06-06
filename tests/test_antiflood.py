@@ -8,9 +8,10 @@ import os
 import asyncio
 import pytest
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from utils.antiflood import InMemoryFloodControl
+
 
 @pytest.mark.asyncio
 async def test_flood_limit_basic():
@@ -21,6 +22,7 @@ async def test_flood_limit_basic():
         assert not await flood.is_flooding(user_id)
     # 4-й — уже флуд
     assert await flood.is_flooding(user_id)
+
 
 @pytest.mark.asyncio
 async def test_flood_limit_reset():
@@ -33,6 +35,7 @@ async def test_flood_limit_reset():
     await asyncio.sleep(1.1)
     assert not await flood.is_flooding(user_id)
 
+
 @pytest.mark.asyncio
 async def test_flood_multiuser():
     flood = InMemoryFloodControl(rate_limit=2, interval_sec=1)
@@ -44,6 +47,7 @@ async def test_flood_multiuser():
     assert await flood.is_flooding(u1)
     assert await flood.is_flooding(u2)
 
+
 @pytest.mark.asyncio
 async def test_no_flood_on_sparse_requests():
     flood = InMemoryFloodControl(rate_limit=2, interval_sec=1)
@@ -54,7 +58,8 @@ async def test_no_flood_on_sparse_requests():
     await asyncio.sleep(1.1)
     assert not await flood.is_flooding(user_id)
 
+
 if __name__ == "__main__":
     import pytest
-    pytest.main([__file__])
 
+    pytest.main([__file__])

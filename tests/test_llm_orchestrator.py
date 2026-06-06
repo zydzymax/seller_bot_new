@@ -5,7 +5,6 @@
 Тест 2: Онлайн-школа + возражение «дороговато»
 """
 
-import asyncio
 import sys
 import os
 
@@ -13,11 +12,10 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from llm.llm_orchestrator import (
-    should_use_senior_model,
     select_model,
     BASE_MODEL,
     SENIOR_MODEL,
-    LEADS_THRESHOLD
+    LEADS_THRESHOLD,
 )
 from dialog.intent_helpers import is_price_objection
 
@@ -36,7 +34,7 @@ def test_price_objection_detection():
         "не потяну такую сумму",
         "за такие деньги можно...",
         "это накладно",
-        "цена кусается"
+        "цена кусается",
     ]
 
     # Не должны определяться как возражения
@@ -45,7 +43,7 @@ def test_price_objection_detection():
         "интересно",
         "а какие есть тарифы?",
         "давайте созвонимся",
-        "хорошо, продолжим"
+        "хорошо, продолжим",
     ]
 
     print("Проверяем возражения по цене:")
@@ -84,21 +82,27 @@ def test_model_selection_logic():
     context2 = {"leads_per_month": 3000, "decision_maker": "self"}
     model2 = select_model("price_objection", context2)
     print(f"  mode=price_objection, leads=3000, dm=self -> {model2}")
-    assert model2 == SENIOR_MODEL, "price_objection с серьезным клиентом должен использовать SENIOR_MODEL"
+    assert (
+        model2 == SENIOR_MODEL
+    ), "price_objection с серьезным клиентом должен использовать SENIOR_MODEL"
 
     # Тест 3: price_objection с < 100 лидов -> BASE_MODEL
     print("\n--- Тест: price_objection + мало лидов ---")
     context3 = {"leads_per_month": 50, "decision_maker": "self"}
     model3 = select_model("price_objection", context3)
     print(f"  mode=price_objection, leads=50, dm=self -> {model3}")
-    assert model3 == BASE_MODEL, "price_objection с малым количеством лидов должен использовать BASE_MODEL"
+    assert (
+        model3 == BASE_MODEL
+    ), "price_objection с малым количеством лидов должен использовать BASE_MODEL"
 
     # Тест 4: price_objection с не-ЛПР -> BASE_MODEL
     print("\n--- Тест: price_objection + не ЛПР ---")
     context4 = {"leads_per_month": 3000, "decision_maker": "partner"}
     model4 = select_model("price_objection", context4)
     print(f"  mode=price_objection, leads=3000, dm=partner -> {model4}")
-    assert model4 == BASE_MODEL, "price_objection с партнером должен использовать BASE_MODEL"
+    assert (
+        model4 == BASE_MODEL
+    ), "price_objection с партнером должен использовать BASE_MODEL"
 
     # Тест 5: generic всегда использует BASE_MODEL
     print("\n--- Тест: generic ---")
@@ -128,10 +132,10 @@ def test_scenario_1_building_materials():
         "channels": "сайт",
         "current_process": "менеджеры вручную",
         "pain": "потерянные заявки",
-        "decision_maker": "self"  # "я" преобразуется в "self"
+        "decision_maker": "self",  # "я" преобразуется в "self"
     }
 
-    print(f"Контекст клиента:")
+    print("Контекст клиента:")
     for k, v in context.items():
         print(f"  {k}: {v}")
 
@@ -178,10 +182,10 @@ def test_scenario_2_online_school():
         "channels": "соцсети, реклама",
         "current_process": "менеджеры",
         "pain": "медленные ответы",
-        "decision_maker": "self"
+        "decision_maker": "self",
     }
 
-    print(f"Контекст клиента:")
+    print("Контекст клиента:")
     for k, v in context.items():
         print(f"  {k}: {v}")
 
@@ -217,10 +221,7 @@ def test_scenario_low_leads():
     """
     print("\n=== Тест 3: Мало лидов (80) ===\n")
 
-    context = {
-        "leads_per_month": 80,
-        "decision_maker": "self"
-    }
+    context = {"leads_per_month": 80, "decision_maker": "self"}
 
     mode = "price_objection"
     model = select_model(mode, context)

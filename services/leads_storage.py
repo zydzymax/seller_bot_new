@@ -57,11 +57,9 @@ async def send_telegram_notification(lead: "Lead") -> bool:
         bot = Bot(token=TELEGRAM_TOKEN)
 
         # Формируем текст уведомления
-        source_emoji = {
-            "website_form": "🌐",
-            "web_chat": "💬",
-            "telegram": "📱"
-        }.get(lead.source, "📋")
+        source_emoji = {"website_form": "🌐", "web_chat": "💬", "telegram": "📱"}.get(
+            lead.source, "📋"
+        )
 
         text = f"""
 {source_emoji} <b>Новый лид #{lead.id}</b>
@@ -85,11 +83,7 @@ async def send_telegram_notification(lead: "Lead") -> bool:
 
         text += f"\n🕐 {lead.created_at}"
 
-        await bot.send_message(
-            chat_id=ADMIN_CHAT_ID,
-            text=text,
-            parse_mode="HTML"
-        )
+        await bot.send_message(chat_id=ADMIN_CHAT_ID, text=text, parse_mode="HTML")
 
         logger.info(f"Telegram notification sent for lead #{lead.id}")
         return True
@@ -123,12 +117,11 @@ async def save_to_google_sheets(lead: "Lead") -> bool:
 
         # Авторизация
         scopes = [
-            'https://www.googleapis.com/auth/spreadsheets',
-            'https://www.googleapis.com/auth/drive'
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
         ]
         creds = Credentials.from_service_account_file(
-            GOOGLE_SHEETS_CREDENTIALS,
-            scopes=scopes
+            GOOGLE_SHEETS_CREDENTIALS, scopes=scopes
         )
         gc = gspread.authorize(creds)
 
@@ -149,7 +142,7 @@ async def save_to_google_sheets(lead: "Lead") -> bool:
             lead.pain or "",
             lead.message or "",
             lead.session_id or "",
-            lead.conversation_id or ""
+            lead.conversation_id or "",
         ]
 
         # Находим следующую пустую строку (по первой колонке)
@@ -157,7 +150,7 @@ async def save_to_google_sheets(lead: "Lead") -> bool:
         next_row = len(col_a_values) + 1
 
         # Вставляем данные в конкретную строку
-        worksheet.insert_row(row, next_row, value_input_option='USER_ENTERED')
+        worksheet.insert_row(row, next_row, value_input_option="USER_ENTERED")
 
         logger.info(f"Lead #{lead.id} saved to Google Sheets")
         return True
@@ -173,6 +166,7 @@ async def save_to_google_sheets(lead: "Lead") -> bool:
 @dataclass
 class Lead:
     """Структура заявки"""
+
     id: int
     source: str  # "website_form", "web_chat", "telegram"
     name: str
@@ -209,7 +203,7 @@ class LeadsStorage:
 
         # Создать пустой файл если не существует
         if not Path(LEADS_FILE).exists():
-            with open(LEADS_FILE, 'w') as f:
+            with open(LEADS_FILE, "w") as f:
                 json.dump([], f)
 
     async def _get_next_id(self) -> int:
@@ -219,19 +213,19 @@ class LeadsStorage:
         else:
             # Fallback на файл
             leads = self._read_leads_file()
-            return max([l.get("id", 0) for l in leads], default=0) + 1
+            return max([lead_item.get("id", 0) for lead_item in leads], default=0) + 1
 
     def _read_leads_file(self) -> List[Dict[str, Any]]:
         """Прочитать заявки из файла"""
         try:
-            with open(LEADS_FILE, 'r') as f:
+            with open(LEADS_FILE, "r") as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return []
 
     def _write_leads_file(self, leads: List[Dict[str, Any]]):
         """Записать заявки в файл"""
-        with open(LEADS_FILE, 'w') as f:
+        with open(LEADS_FILE, "w") as f:
             json.dump(leads, f, ensure_ascii=False, indent=2)
 
     async def save_lead(self, lead: Lead) -> Dict[str, Any]:
@@ -254,13 +248,12 @@ class LeadsStorage:
             # Сохраняем в Redis
             if self.redis:
                 await self.redis.lpush(
-                    LEADS_REDIS_KEY,
-                    json.dumps(lead_dict, ensure_ascii=False)
+                    LEADS_REDIS_KEY, json.dumps(lead_dict, ensure_ascii=False)
                 )
                 # Сохраняем отдельно по ID для быстрого доступа
                 await self.redis.set(
                     f"{LEADS_REDIS_KEY}:{lead.id}",
-                    json.dumps(lead_dict, ensure_ascii=False)
+                    json.dumps(lead_dict, ensure_ascii=False),
                 )
 
             # Дублируем в файл
@@ -272,7 +265,11 @@ class LeadsStorage:
                 "Lead saved",
                 lead_id=lead.id,
                 source=lead.source,
-                contact=lead.contact[:20] + "..." if len(lead.contact) > 20 else lead.contact
+                contact=(
+                    lead.contact[:20] + "..."
+                    if len(lead.contact) > 20
+                    else lead.contact
+                ),
             )
 
             # Отправляем уведомление в Telegram (без await чтобы не блокировать)
@@ -284,21 +281,15 @@ class LeadsStorage:
             return {
                 "status": "success",
                 "lead_id": lead.id,
-                "created_at": lead.created_at
+                "created_at": lead.created_at,
             }
 
         except Exception as e:
             logger.error(f"Error saving lead: {e}", exc_info=True)
-            return {
-                "status": "error",
-                "error": str(e)
-            }
+            return {"status": "error", "error": str(e)}
 
     async def get_leads(
-        self,
-        source: Optional[str] = None,
-        limit: int = 100,
-        offset: int = 0
+        self, source: Optional[str] = None, limit: int = 100, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """
         Получить список заявок.
@@ -315,19 +306,19 @@ class LeadsStorage:
             if self.redis:
                 # Из Redis
                 raw_leads = await self.redis.lrange(
-                    LEADS_REDIS_KEY,
-                    offset,
-                    offset + limit - 1
+                    LEADS_REDIS_KEY, offset, offset + limit - 1
                 )
-                leads = [json.loads(l) for l in raw_leads]
+                leads = [json.loads(raw_lead) for raw_lead in raw_leads]
             else:
                 # Из файла
                 all_leads = self._read_leads_file()
-                leads = all_leads[offset:offset + limit]
+                leads = all_leads[offset : offset + limit]
 
             # Фильтрация по источнику
             if source:
-                leads = [l for l in leads if l.get("source") == source]
+                leads = [
+                    lead_item for lead_item in leads if lead_item.get("source") == source
+                ]
 
             return leads
 
@@ -360,15 +351,10 @@ class LeadsStorage:
         try:
             leads = self._read_leads_file()
 
-            stats = {
-                "total": len(leads),
-                "by_source": {},
-                "today": 0,
-                "this_week": 0
-            }
+            stats = {"total": len(leads), "by_source": {}, "today": 0, "this_week": 0}
 
             today = datetime.now().date()
-            week_ago = datetime.now().date().isoformat()
+            datetime.now().date().isoformat()
 
             for lead in leads:
                 # По источникам
@@ -397,7 +383,7 @@ async def get_leads_storage() -> LeadsStorage:
 
     if _leads_storage is None:
         # Подключение к Redis
-        redis_url = os.getenv('REDIS_ADDR', 'redis://localhost:6379/0')
+        redis_url = os.getenv("REDIS_ADDR", "redis://localhost:6379/0")
         try:
             redis_client = aioredis.from_url(redis_url)
             await redis_client.ping()
@@ -425,7 +411,8 @@ def detect_contact_type(contact: str) -> str:
 
     # Телефон (цифры, пробелы, дефисы, скобки, плюс)
     import re
-    phone_pattern = r'^[\+]?[\d\s\-\(\)]{7,20}$'
+
+    phone_pattern = r"^[\+]?[\d\s\-\(\)]{7,20}$"
     if re.match(phone_pattern, contact.replace(" ", "")):
         return "phone"
 

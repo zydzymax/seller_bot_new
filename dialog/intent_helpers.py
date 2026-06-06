@@ -298,29 +298,24 @@ CONTACT_PATTERNS = [
     r"t\.me/\w+",  # telegram link
     r"tg://resolve\?domain=\w+",  # telegram deep link
     r"telegram[:\s]+@?\w+",  # "telegram: username" или "telegram @username"
-
     # Телефоны (российские и международные)
     r"\+7[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",  # +7 (999) 123-45-67
     r"8[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",  # 8 (999) 123-45-67
     r"\+?\d{1,3}[\s\-]?\d{9,12}",  # международный формат
     r"(?<!\d)\d{10,11}(?!\d)",  # 10-11 цифр подряд (без + в начале)
-
     # WhatsApp
     r"wa\.me/\d+",  # wa.me/79991234567
     r"whatsapp[:\s]+[\+\d\s\-\(\)]{10,}",  # "whatsapp: +7 999 123-45-67"
     r"ватсап[:\s]+[\+\d\s\-\(\)]{10,}",  # "ватсап: +7 999 123-45-67"
     r"вотсап[:\s]+[\+\d\s\-\(\)]{10,}",  # "вотсап: ..."
     r"вацап[:\s]+[\+\d\s\-\(\)]{10,}",  # "вацап: ..."
-
     # MAX (VK Мессенджер, ранее MAX)
     r"max[:\s]+@?\w+",  # "max: username" или "max @username"
     r"макс[:\s]+@?\w+",  # "макс: username"
     r"vk\.me/\w+",  # vk.me/username
     r"vk\.com/\w+",  # vk.com/username
-
     # Email
     r"[\w\.-]+@[\w\.-]+\.\w{2,}",  # email с доменом минимум 2 символа
-
     # Viber
     r"viber[:\s]+[\+\d\s\-\(\)]{10,}",  # "viber: +7 999 123-45-67"
     r"вайбер[:\s]+[\+\d\s\-\(\)]{10,}",  # "вайбер: ..."
@@ -646,7 +641,7 @@ def is_contact_info(text: str) -> bool:
     # Проверяем ключевые слова с номером телефона
     # Например: "мой номер 89991234567" или "звоните +7 999 123 45 67"
     has_keyword = any(kw in t_lower for kw in CONTACT_KEYWORDS)
-    has_digits = bool(re.search(r'\d{7,}', t.replace(" ", "").replace("-", "")))
+    has_digits = bool(re.search(r"\d{7,}", t.replace(" ", "").replace("-", "")))
 
     if has_keyword and has_digits:
         return True
@@ -730,7 +725,7 @@ def extract_number(text: str) -> Optional[int]:
         Число или None
     """
     # Обработка диапазонов типа "300-400"
-    range_match = re.search(r'(\d+)\s*[-–]\s*(\d+)', text)
+    range_match = re.search(r"(\d+)\s*[-–]\s*(\d+)", text)
     if range_match:
         # Берем среднее значение диапазона
         low = int(range_match.group(1))
@@ -738,10 +733,10 @@ def extract_number(text: str) -> Optional[int]:
         return (low + high) // 2
 
     # Обработка чисел с пробелами/разделителями (1 000, 1,000)
-    numbers = re.findall(r'\d[\d\s,\.]*\d|\d', text)
+    numbers = re.findall(r"\d[\d\s,\.]*\d|\d", text)
     if numbers:
         # Берем первое найденное число
-        num_str = numbers[0].replace(' ', '').replace(',', '').replace('.', '')
+        num_str = numbers[0].replace(" ", "").replace(",", "").replace(".", "")
         try:
             return int(num_str)
         except ValueError:
@@ -781,7 +776,14 @@ def quick_slot_extraction(text: str, context_question: str = "") -> Dict[str, An
     number = extract_number(text)
     if number and number >= 5:
         # Проверяем контекст - спрашивали про бюджет?
-        budget_keywords = ["бюджет", "комфортен", "готовы потратить", "стоимость", "цена", "сколько готовы"]
+        budget_keywords = [
+            "бюджет",
+            "комфортен",
+            "готовы потратить",
+            "стоимость",
+            "цена",
+            "сколько готовы",
+        ]
         is_budget_context = any(kw in context_lower for kw in budget_keywords)
 
         # Проверяем текст на признаки бюджета (рубли, тысячи)
@@ -792,7 +794,14 @@ def quick_slot_extraction(text: str, context_question: str = "") -> Dict[str, An
             slots["budget_range"] = number
         else:
             # Проверяем контекст - спрашивали про заявки?
-            volume_keywords = ["заявок", "заявки", "лидов", "обращений", "в месяц", "количество"]
+            volume_keywords = [
+                "заявок",
+                "заявки",
+                "лидов",
+                "обращений",
+                "в месяц",
+                "количество",
+            ]
             is_volume_context = any(kw in context_lower for kw in volume_keywords)
 
             if is_volume_context or (number >= 10 and number <= 10000):
@@ -928,11 +937,22 @@ def looks_like_noise(text: str) -> bool:
         return True
 
     # Односложные подтверждения
-    noise_words = ["ок", "окей", "угу", "ага", "ясно", "понял", "понятно", "ладно", "хорошо"]
+    noise_words = [
+        "ок",
+        "окей",
+        "угу",
+        "ага",
+        "ясно",
+        "понял",
+        "понятно",
+        "ладно",
+        "хорошо",
+    ]
     return t in noise_words
 
 
 # ============== CLOSING HELPERS ==============
+
 
 def is_dont_know_time(text: str) -> bool:
     """

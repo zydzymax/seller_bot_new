@@ -19,7 +19,7 @@ from typing import Dict, Any, Optional, Tuple
 from enum import Enum
 from dataclasses import dataclass, field
 
-from dialog.intent_helpers import is_agreement, is_rejection, extract_number
+from dialog.intent_helpers import extract_number
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -27,6 +27,7 @@ logger = get_logger(__name__)
 
 class PreBotState(Enum):
     """Состояния скриптового pre-bot"""
+
     GREETING = "GREETING"
     ASK_NAME = "ASK_NAME"
     ASK_NICHE = "ASK_NICHE"
@@ -46,25 +47,17 @@ PREBOT_MESSAGES = {
 Помогаю бизнесу автоматизировать обработку заявок с помощью ИИ-ботов.
 
 Как вас зовут?""",
-
     PreBotState.ASK_NAME: "Как вас зовут?",
-
     PreBotState.ASK_NICHE: "Приятно познакомиться, {name}! В какой нише работает ваш бизнес?",
-
     PreBotState.ASK_LEADS: "Отлично! Сколько примерно заявок/обращений получаете в месяц?",
-
     PreBotState.ASK_CHANNELS: "Откуда в основном приходят заявки: сайт, соцсети, мессенджеры, звонки?",
-
     PreBotState.ASK_CURRENT_PROCESS: "Как сейчас обрабатываете заявки? Менеджеры вручную, есть какой-то бот, или как-то ещё?",
-
     PreBotState.ASK_PAIN: """Понял! Где больше всего болит:
 • медленные ответы
 • потерянные заявки
 • перегруз менеджеров
 • что-то другое?""",
-
     PreBotState.ASK_DECISION_MAKER: "Кто принимает решения о внедрении новых решений: вы, партнёр, руководитель?",
-
     PreBotState.ASK_AVG_CHECK: "Чтобы потом понять окупаемость, подскажите примерный средний чек по заказу? Можно вилку, например «3–5 тысяч» или «50–100 тысяч». Если сложно сказать — напишите «не знаю».",
 }
 
@@ -76,13 +69,14 @@ REQUIRED_SLOTS = [
     "channels",
     "current_process",
     "pain",
-    "decision_maker"
+    "decision_maker",
 ]
 
 
 @dataclass
 class PreBotContext:
     """Контекст скриптового pre-bot"""
+
     state: PreBotState = PreBotState.GREETING
     slots: Dict[str, Any] = field(default_factory=dict)
     message_count: int = 0
@@ -91,7 +85,7 @@ class PreBotContext:
         return {
             "state": self.state.value,
             "slots": self.slots,
-            "message_count": self.message_count
+            "message_count": self.message_count,
         }
 
     @classmethod
@@ -99,7 +93,7 @@ class PreBotContext:
         return cls(
             state=PreBotState(data.get("state", "GREETING")),
             slots=data.get("slots", {}),
-            message_count=data.get("message_count", 0)
+            message_count=data.get("message_count", 0),
         )
 
 
@@ -142,9 +136,7 @@ class ScriptPreBot:
         ]
 
     def process_message(
-        self,
-        message: str,
-        context: PreBotContext
+        self, message: str, context: PreBotContext
     ) -> Tuple[str, PreBotContext, bool]:
         """
         Обработать сообщение пользователя.
@@ -158,7 +150,9 @@ class ScriptPreBot:
         context.message_count += 1
         message_clean = message.strip()
 
-        logger.info(f"PreBot processing: state={context.state.value}, message='{message_clean[:50]}...'")
+        logger.info(
+            f"PreBot processing: state={context.state.value}, message='{message_clean[:50]}...'"
+        )
 
         # Обработка GREETING - первое сообщение
         if context.state == PreBotState.GREETING:
@@ -170,7 +164,9 @@ class ScriptPreBot:
         # Извлекаем данные из сообщения для текущего состояния
         slot_name = self.state_slot_map.get(context.state)
         if slot_name:
-            extracted_value = self._extract_slot_value(slot_name, message_clean, context)
+            extracted_value = self._extract_slot_value(
+                slot_name, message_clean, context
+            )
             if extracted_value:
                 context.slots[slot_name] = extracted_value
                 logger.info(f"PreBot extracted: {slot_name} = {extracted_value}")
@@ -192,10 +188,7 @@ class ScriptPreBot:
         return response, context, handoff
 
     def _extract_slot_value(
-        self,
-        slot_name: str,
-        message: str,
-        context: PreBotContext
+        self, slot_name: str, message: str, context: PreBotContext
     ) -> Optional[Any]:
         """Извлечь значение слота из сообщения"""
         message_lower = message.lower().strip()
@@ -203,7 +196,12 @@ class ScriptPreBot:
         if slot_name == "name":
             # Имя - берём как есть (первое слово или всё)
             # Убираем "меня зовут", "я" и т.п.
-            name = re.sub(r'^(меня зовут|я|привет,?\s*я?)\s*', '', message_lower, flags=re.IGNORECASE)
+            name = re.sub(
+                r"^(меня зовут|я|привет,?\s*я?)\s*",
+                "",
+                message_lower,
+                flags=re.IGNORECASE,
+            )
             name = name.strip().title()
             return name if name else message.strip().title()
 
@@ -228,7 +226,15 @@ class ScriptPreBot:
             channels = []
             channel_keywords = {
                 "сайт": ["сайт", "сайта", "веб", "лендинг"],
-                "соцсети": ["соцсет", "инстаграм", "instagram", "вк", "vk", "facebook", "фейсбук"],
+                "соцсети": [
+                    "соцсет",
+                    "инстаграм",
+                    "instagram",
+                    "вк",
+                    "vk",
+                    "facebook",
+                    "фейсбук",
+                ],
                 "telegram": ["телеграм", "telegram", "тг"],
                 "whatsapp": ["whatsapp", "ватсап", "вотсап", "wa"],
                 "звонки": ["звон", "телефон", "колл"],
@@ -252,28 +258,53 @@ class ScriptPreBot:
             # Кто принимает решения
             if any(w in message_lower for w in ["я", "сам", "лично", "самостоятельно"]):
                 return "self"
-            if any(w in message_lower for w in ["партнёр", "партнер", "совместно", "вместе"]):
+            if any(
+                w in message_lower
+                for w in ["партнёр", "партнер", "совместно", "вместе"]
+            ):
                 return "partner"
-            if any(w in message_lower for w in ["руковод", "директор", "босс", "начальник", "собственник", "владелец"]):
+            if any(
+                w in message_lower
+                for w in [
+                    "руковод",
+                    "директор",
+                    "босс",
+                    "начальник",
+                    "собственник",
+                    "владелец",
+                ]
+            ):
                 return "owner"
             return message.strip()
 
         elif slot_name == "avg_check":
             # Средний чек - опциональный слот
             # Если клиент не знает - пропускаем
-            if any(w in message_lower for w in ["не знаю", "сложно", "затрудняюсь", "не скажу", "разный", "зависит"]):
+            if any(
+                w in message_lower
+                for w in [
+                    "не знаю",
+                    "сложно",
+                    "затрудняюсь",
+                    "не скажу",
+                    "разный",
+                    "зависит",
+                ]
+            ):
                 return None  # Пропускаем слот
 
             # Пытаемся извлечь число
             number = extract_number(message)
             if number:
                 # Корректируем если указано в тысячах
-                if number < 1000 and any(w in message_lower for w in ["тыс", "к ", "к.", "тысяч"]):
+                if number < 1000 and any(
+                    w in message_lower for w in ["тыс", "к ", "к.", "тысяч"]
+                ):
                     number *= 1000
                 return number
 
             # Если есть диапазон типа "50-100 тысяч" - берём среднее
-            range_match = re.search(r'(\d+)\s*[-–]\s*(\d+)', message)
+            range_match = re.search(r"(\d+)\s*[-–]\s*(\d+)", message)
             if range_match:
                 low = int(range_match.group(1))
                 high = int(range_match.group(2))
@@ -299,7 +330,7 @@ class ScriptPreBot:
         current_idx = self.state_order.index(context.state)
 
         # Ищем следующий незаполненный слот
-        for next_state in self.state_order[current_idx + 1:]:
+        for next_state in self.state_order[current_idx + 1 :]:
             slot_name = self.state_slot_map.get(next_state)
 
             # Если это HANDOFF - возвращаем его

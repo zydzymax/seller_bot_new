@@ -13,6 +13,7 @@ from enum import Enum
 
 class Domain(str, Enum):
     """Доступные домены"""
+
     TEXTILE_MANUFACTURING = "textile_manufacturing"
     AI_SELLER_SELF = "ai_seller_self"
 
@@ -20,6 +21,7 @@ class Domain(str, Enum):
 @dataclass
 class DomainConfig:
     """Конфигурация домена"""
+
     domain: str
     version: str
     language: str
@@ -72,17 +74,17 @@ class DomainLoader:
         if not domain_yaml.exists():
             raise FileNotFoundError(f"domain.yaml not found in {domain_path}")
 
-        with open(domain_yaml, 'r', encoding='utf-8') as f:
+        with open(domain_yaml, "r", encoding="utf-8") as f:
             domain_data = yaml.safe_load(f)
 
         # Create config object
         config = DomainConfig(
-            domain=domain_data.get('domain', domain_name),
-            version=domain_data.get('version', '1.0.0'),
-            language=domain_data.get('language', 'ru'),
-            active=domain_data.get('active', True),
-            description=domain_data.get('description', ''),
-            domain_path=domain_path
+            domain=domain_data.get("domain", domain_name),
+            version=domain_data.get("version", "1.0.0"),
+            language=domain_data.get("language", "ru"),
+            active=domain_data.get("active", True),
+            description=domain_data.get("description", ""),
+            domain_path=domain_path,
         )
 
         # Check if domain is active
@@ -92,25 +94,25 @@ class DomainLoader:
         # Load slots
         slots_yaml = domain_path / "slots.yaml"
         if slots_yaml.exists():
-            with open(slots_yaml, 'r', encoding='utf-8') as f:
+            with open(slots_yaml, "r", encoding="utf-8") as f:
                 config.slots = yaml.safe_load(f)
 
         # Load states
         states_yaml = domain_path / "states.yaml"
         if states_yaml.exists():
-            with open(states_yaml, 'r', encoding='utf-8') as f:
+            with open(states_yaml, "r", encoding="utf-8") as f:
                 config.states = yaml.safe_load(f)
 
         # Load business rules
         rules_yaml = domain_path / "business_rules.yaml"
         if rules_yaml.exists():
-            with open(rules_yaml, 'r', encoding='utf-8') as f:
+            with open(rules_yaml, "r", encoding="utf-8") as f:
                 config.business_rules = yaml.safe_load(f)
 
         # Load system prompt
         system_prompt_md = domain_path / "prompts" / "system_prompt.md"
         if system_prompt_md.exists():
-            with open(system_prompt_md, 'r', encoding='utf-8') as f:
+            with open(system_prompt_md, "r", encoding="utf-8") as f:
                 config.system_prompt = f.read()
 
         return config
@@ -122,13 +124,12 @@ class DomainLoader:
         Returns:
             Имя активного домена (по умолчанию: textile_manufacturing)
         """
-        domain = os.getenv('AI_SELLER_DOMAIN', Domain.TEXTILE_MANUFACTURING.value)
+        domain = os.getenv("AI_SELLER_DOMAIN", Domain.TEXTILE_MANUFACTURING.value)
 
         # Validate
         if domain not in [d.value for d in Domain]:
             raise ValueError(
-                f"Invalid domain '{domain}'. "
-                f"Available: {[d.value for d in Domain]}"
+                f"Invalid domain '{domain}'. " f"Available: {[d.value for d in Domain]}"
             )
 
         return domain
@@ -199,7 +200,7 @@ def switch_domain(domain_name: str) -> DomainConfig:
     _current_domain_config = loader.load_domain(domain_name)
 
     # Update env var
-    os.environ['AI_SELLER_DOMAIN'] = domain_name
+    os.environ["AI_SELLER_DOMAIN"] = domain_name
 
     return _current_domain_config
 

@@ -6,7 +6,6 @@ Simple Learning System
 import random
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
-from collections import defaultdict
 import json
 import time
 
@@ -14,6 +13,7 @@ import time
 @dataclass
 class Variant:
     """Вариант (реплика, порядок действий и т.д.)"""
+
     variant_id: str
     content: str
 
@@ -42,12 +42,13 @@ class Variant:
 @dataclass
 class VariantGroup:
     """Группа вариантов для одного контекста (напр., greeting для textile)"""
+
     context: str  # "greeting:textile", "objection_price:ai_seller"
     variants: List[Variant] = field(default_factory=list)
 
     # Hyperparameters
     epsilon: float = 0.2  # 20% exploration (тестирование новых вариантов)
-    min_trials: int = 5   # Минимум попыток перед выводами
+    min_trials: int = 5  # Минимум попыток перед выводами
 
     def add_variant(self, variant: Variant):
         """Добавить вариант"""
@@ -74,10 +75,7 @@ class VariantGroup:
             return random.choice(self.variants)
 
         # Иначе выбираем с максимальным success_rate * confidence
-        best_variant = max(
-            self.variants,
-            key=lambda v: v.success_rate * v.confidence
-        )
+        best_variant = max(self.variants, key=lambda v: v.success_rate * v.confidence)
 
         return best_variant
 
@@ -101,14 +99,18 @@ class VariantGroup:
         """Получить статистику по вариантам"""
         stats = []
         for v in sorted(self.variants, key=lambda x: x.success_rate, reverse=True):
-            stats.append({
-                'variant_id': v.variant_id,
-                'content': v.content[:50] + '...' if len(v.content) > 50 else v.content,
-                'trials': v.trials,
-                'successes': v.successes,
-                'success_rate': v.success_rate,
-                'confidence': v.confidence
-            })
+            stats.append(
+                {
+                    "variant_id": v.variant_id,
+                    "content": (
+                        v.content[:50] + "..." if len(v.content) > 50 else v.content
+                    ),
+                    "trials": v.trials,
+                    "successes": v.successes,
+                    "success_rate": v.success_rate,
+                    "confidence": v.confidence,
+                }
+            )
         return stats
 
 
@@ -141,10 +143,7 @@ class SimpleLearner:
         for variant_id, content in variants:
             # Проверяем что такого variant_id еще нет
             if not any(v.variant_id == variant_id for v in group.variants):
-                group.add_variant(Variant(
-                    variant_id=variant_id,
-                    content=content
-                ))
+                group.add_variant(Variant(variant_id=variant_id, content=content))
 
     def select_variant(self, context: str) -> Optional[Tuple[str, str]]:
         """
@@ -195,9 +194,7 @@ class SimpleLearner:
         """
         if context:
             if context in self.variant_groups:
-                return {
-                    context: self.variant_groups[context].get_stats()
-                }
+                return {context: self.variant_groups[context].get_stats()}
             return {}
 
         # Все контексты
@@ -212,45 +209,45 @@ class SimpleLearner:
         data = {}
         for context, group in self.variant_groups.items():
             data[context] = {
-                'variants': [
+                "variants": [
                     {
-                        'variant_id': v.variant_id,
-                        'content': v.content,
-                        'trials': v.trials,
-                        'successes': v.successes,
-                        'created_at': v.created_at,
-                        'last_used_at': v.last_used_at
+                        "variant_id": v.variant_id,
+                        "content": v.content,
+                        "trials": v.trials,
+                        "successes": v.successes,
+                        "created_at": v.created_at,
+                        "last_used_at": v.last_used_at,
                     }
                     for v in group.variants
                 ],
-                'epsilon': group.epsilon,
-                'min_trials': group.min_trials
+                "epsilon": group.epsilon,
+                "min_trials": group.min_trials,
             }
 
-        with open(self.storage_path, 'w', encoding='utf-8') as f:
+        with open(self.storage_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
     def _load(self):
         """Загрузить из файла"""
         try:
-            with open(self.storage_path, 'r', encoding='utf-8') as f:
+            with open(self.storage_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             for context, group_data in data.items():
                 group = VariantGroup(
                     context=context,
-                    epsilon=group_data.get('epsilon', 0.2),
-                    min_trials=group_data.get('min_trials', 5)
+                    epsilon=group_data.get("epsilon", 0.2),
+                    min_trials=group_data.get("min_trials", 5),
                 )
 
-                for v_data in group_data['variants']:
+                for v_data in group_data["variants"]:
                     variant = Variant(
-                        variant_id=v_data['variant_id'],
-                        content=v_data['content'],
-                        trials=v_data.get('trials', 0),
-                        successes=v_data.get('successes', 0),
-                        created_at=v_data.get('created_at', time.time()),
-                        last_used_at=v_data.get('last_used_at')
+                        variant_id=v_data["variant_id"],
+                        content=v_data["content"],
+                        trials=v_data.get("trials", 0),
+                        successes=v_data.get("successes", 0),
+                        created_at=v_data.get("created_at", time.time()),
+                        last_used_at=v_data.get("last_used_at"),
                     )
                     group.add_variant(variant)
 
@@ -277,11 +274,20 @@ if __name__ == "__main__":
     learner = SimpleLearner("test_learner.json")
 
     # Добавляем варианты приветствия
-    learner.add_variants("greeting:ai_seller_self", [
-        ("greet_v1", "Привет! Я Алекс, помогаю автоматизировать продажи. Чем занимаетесь?"),
-        ("greet_v2", "Здравствуйте! Меня зовут Алекс. Расскажите о вашем бизнесе?"),
-        ("greet_v3", "Добрый день! Помогаю внедрять AI-ботов для продаж. Ваша ниша?")
-    ])
+    learner.add_variants(
+        "greeting:ai_seller_self",
+        [
+            (
+                "greet_v1",
+                "Привет! Я Алекс, помогаю автоматизировать продажи. Чем занимаетесь?",
+            ),
+            ("greet_v2", "Здравствуйте! Меня зовут Алекс. Расскажите о вашем бизнесе?"),
+            (
+                "greet_v3",
+                "Добрый день! Помогаю внедрять AI-ботов для продаж. Ваша ниша?",
+            ),
+        ],
+    )
 
     # Симуляция использования
     for i in range(100):
@@ -298,6 +304,10 @@ if __name__ == "__main__":
         learner.record_outcome("greeting:ai_seller_self", variant_id, success)
 
     # Статистика
-    print(json.dumps(learner.get_stats("greeting:ai_seller_self"), indent=2, ensure_ascii=False))
+    print(
+        json.dumps(
+            learner.get_stats("greeting:ai_seller_self"), indent=2, ensure_ascii=False
+        )
+    )
 
     learner.save()

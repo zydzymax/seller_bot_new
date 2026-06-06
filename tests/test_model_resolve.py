@@ -14,7 +14,7 @@ def test_resolve_valid_models():
     assert resolve_model("gpt-4o") == ("openai", "gpt-4o")
     assert resolve_model("gpt-4-turbo") == ("openai", "gpt-4-turbo")
     assert resolve_model("claude-opus") == ("anthropic", "claude-3-opus-20240229")
-    
+
     # Алиасы
     assert resolve_model("gpt4t") == ("openai", "gpt-4-turbo")
     assert resolve_model("gpt4") == ("openai", "gpt-4-turbo")
@@ -24,7 +24,7 @@ def test_resolve_invalid_model():
     """Тест резолвера для неизвестных моделей"""
     with pytest.raises(ValueError) as exc_info:
         resolve_model("unknown-model")
-    
+
     assert "Неизвестная модель 'unknown-model'" in str(exc_info.value)
     assert "Доступны:" in str(exc_info.value)
 
@@ -39,10 +39,17 @@ def test_model_map_coverage():
     """Тест полноты карты моделей"""
     # Проверяем, что все ожидаемые модели есть
     expected_models = [
-        "gpt-4o", "gpt-4-turbo", "gpt-5", "gpt-5-mini", "gpt-5-nano",
-        "claude-opus", "claude-haiku", "gpt4t", "gpt4"
+        "gpt-4o",
+        "gpt-4-turbo",
+        "gpt-5",
+        "gpt-5-mini",
+        "gpt-5-nano",
+        "claude-opus",
+        "claude-haiku",
+        "gpt4t",
+        "gpt4",
     ]
-    
+
     for model in expected_models:
         assert model in MODEL_MAP
         provider, model_id = MODEL_MAP[model]

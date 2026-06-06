@@ -1,11 +1,15 @@
 import asyncio
 import hashlib
+import logging
 import time
 
 try:
     from cachetools import TTLCache
 except ImportError:
     TTLCache = dict
+
+logger = logging.getLogger(__name__)
+
 
 class AsyncRedisFloodControl:
     LUA_SCRIPT = """
@@ -31,7 +35,9 @@ class AsyncRedisFloodControl:
 
     def _user_hash(self, user_id: int) -> str:
         salt = b"sovani_anti_flood_salt"
-        return hashlib.blake2b(str(user_id).encode(), key=salt, digest_size=16).hexdigest()
+        return hashlib.blake2b(
+            str(user_id).encode(), key=salt, digest_size=16
+        ).hexdigest()
 
     async def is_limited(self, user_id: int) -> bool:
         user_hash = self._user_hash(user_id)
@@ -42,8 +48,9 @@ class AsyncRedisFloodControl:
             )
             return bool(result)
         except Exception as e:
-            print(f"[ANTIFLOOD] Redis error: {e} — fallback in-memory")
+            logger.warning("[ANTIFLOOD] Redis error: %s — fallback in-memory", e)
             return await self.fallback.is_limited(user_id)
+
 
 class InMemoryFloodControl:
     def __init__(self, rate_limit=3, interval_sec=10, max_size=10000):
@@ -64,9 +71,14 @@ class InMemoryFloodControl:
             timestamps.append(now)
             self._cache[user_id] = timestamps
             if len(timestamps) > self.rate_limit:
-                print(f"[ANTIFLOOD] Limit! user_hash={user_hash}")
+                logger.info("[ANTIFLOOD] Limit reached for user_hash=%s", user_hash)
                 return True
             return False
+
+    async def is_flooding(self, user_id: int) -> bool:
+        """Legacy alias for compatibility with older tests/callers."""
+        return await self.is_limited(user_id)
+
 
 class AntiFloodMiddleware:
     def __init__(self, redis=None, rate_limit=3, interval_sec=10):
@@ -77,3 +89,7 @@ class AntiFloodMiddleware:
 
     async def is_limited(self, user_id: int) -> bool:
         return await self.backend.is_limited(user_id)
+
+    async def is_flooding(self, user_id: int) -> bool:
+        """Legacy alias for compatibility with older tests/callers."""
+        return await self.is_limited(user_id)

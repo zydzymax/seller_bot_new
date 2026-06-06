@@ -9,6 +9,7 @@ import re
 from datetime import datetime
 from dataclasses import dataclass, field
 
+
 # --- Описываем стадии диалога (воронку) ---
 class Stage(str, Enum):
     WELCOME = "welcome"
@@ -19,6 +20,7 @@ class Stage(str, Enum):
     CONTACTS = "contacts"
     COMPLETED = "completed"
 
+
 # --- Сообщение в истории диалога ---
 @dataclass
 class Message:
@@ -26,6 +28,7 @@ class Message:
     content: str
     timestamp: datetime = field(default_factory=datetime.now)
     meta: Dict = field(default_factory=dict)
+
 
 # --- Валидаторы для пользовательского ввода ---
 class Validators:
@@ -57,6 +60,7 @@ class Validators:
             return validators[field](value)
         return True, value.strip()
 
+
 # --- Извлекает данные из произвольного текста пользователя ---
 class DataExtractor:
     @staticmethod
@@ -78,6 +82,7 @@ class DataExtractor:
             if word in text.lower():
                 result["deadline"] = text
         return result
+
 
 # --- Состояние диалога конкретного пользователя ---
 class DialogState:
@@ -129,26 +134,45 @@ class DialogState:
             (Stage.DEADLINE, "deadline"),
             (Stage.CONTACTS, "contacts"),
         ]
-        for idx, (stg, field) in enumerate(order):
-            if self.stage == stg and self.data[field]:
+        for idx, (stg, field_name) in enumerate(order):
+            if self.stage == stg and self.data[field_name]:
                 self.previous_stages.append(self.stage)
-                self.stage = Stage(order[idx + 1][0]) if idx + 1 < len(order) else Stage.COMPLETED
+                self.stage = (
+                    Stage(order[idx + 1][0])
+                    if idx + 1 < len(order)
+                    else Stage.COMPLETED
+                )
 
     def process_message(self, message: str) -> Dict:
-        self.add_message('user', message)
+        self.add_message("user", message)
         extracted = DataExtractor.extract_all_data(message)
-        for field, value in extracted.items():
-            self.update_data(field, value)
+        for field_name, value in extracted.items():
+            self.update_data(field_name, value)
         if not extracted:
             current = self._get_current_field()
             if current:
                 self.update_data(current, message)
         if self.validation_errors:
             err_field, err_text = next(iter(self.validation_errors.items()))
-            return {"response": err_text, "stage": self.stage.value, "is_complete": False, "data": self.data}
+            return {
+                "response": err_text,
+                "stage": self.stage.value,
+                "is_complete": False,
+                "data": self.data,
+            }
         if self.is_complete():
-            return {"response": self._summary(), "stage": self.stage.value, "is_complete": True, "data": self.data}
-        return {"response": self.get_next_question(), "stage": self.stage.value, "is_complete": False, "data": self.data}
+            return {
+                "response": self._summary(),
+                "stage": self.stage.value,
+                "is_complete": True,
+                "data": self.data,
+            }
+        return {
+            "response": self.get_next_question(),
+            "stage": self.stage.value,
+            "is_complete": False,
+            "data": self.data,
+        }
 
     def get_next_question(self) -> Optional[str]:
         questions = {
@@ -175,11 +199,13 @@ class DialogState:
             "Менеджер свяжется для уточнения деталей. Спасибо!"
         )
 
+
 # --- Главная обёртка FSM для подключения к flow_manager ---
 class StateMachine:
     """
     Обёртка для FSM/dialog, реализующая ожидаемый интерфейс для flow_manager.
     """
+
     def __init__(self):
         self.dialogs = {}
 
@@ -194,7 +220,9 @@ class StateMachine:
             ctx.state.stage = Stage.COMPLETED
         return response, ctx
 
+
 # --- Интерфейсные методы для flow_manager ---
+
 
 def get_current_stage(history: List[dict]) -> str:
     """
@@ -204,17 +232,22 @@ def get_current_stage(history: List[dict]) -> str:
     if not history:
         return "cold"
     last = history[-1]["content"].lower()
-    if any(x in last for x in ["цена", "стоимость", "договор", "кп", "срок", "сколько"]):
+    if any(
+        x in last for x in ["цена", "стоимость", "договор", "кп", "срок", "сколько"]
+    ):
         return "negotiating"
     if any(x in last for x in ["образец", "запуск", "закрыть", "итог", "заказ"]):
         return "closing"
-    if any(x in last for x in ["не устраивает", "дорого", "сомневаюсь", "альтернатива"]):
+    if any(
+        x in last for x in ["не устраивает", "дорого", "сомневаюсь", "альтернатива"]
+    ):
         return "objection"
     if any(x in last for x in ["интересует", "рассчитать", "подробнее", "расскажите"]):
         return "interested"
     if any(x in last for x in ["ткань", "размер", "цвет", "упаковка", "сроки"]):
         return "qualifying"
     return "cold"
+
 
 def get_current_emotion(history: List[dict]) -> str:
     """
@@ -224,7 +257,10 @@ def get_current_emotion(history: List[dict]) -> str:
     if not history:
         return "neutral"
     last = history[-1]["content"].lower()
-    if any(x in last for x in ["дорого", "долго", "не устраивает", "сомневаюсь", "разочарован"]):
+    if any(
+        x in last
+        for x in ["дорого", "долго", "не устраивает", "сомневаюсь", "разочарован"]
+    ):
         return "frustrated"
     if any(x in last for x in ["спасибо", "отлично", "понравилось", "хорошо"]):
         return "positive"

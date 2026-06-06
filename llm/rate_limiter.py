@@ -7,19 +7,22 @@ rate_limiter.py
 
 import time
 import hashlib
-import logging
 from typing import Optional, Callable, Tuple
 from redis.asyncio import Redis
 import yaml
 
+
 class RateLimitExceeded(Exception):
     pass
+
 
 class RateLimitUnavailable(Exception):
     pass
 
+
 def _sanitize(val: str) -> str:
     return val[:128].replace(":", "_").replace("{", "").replace("}", "")
+
 
 class TokenBucketRateLimiter:
     """
@@ -29,10 +32,10 @@ class TokenBucketRateLimiter:
     def __init__(
         self,
         redis_url: str = "redis://localhost:6379/0",
-        default_bucket: Tuple[int, float] = (10, 1.0),   # (bucket_size, refill_rate)
+        default_bucket: Tuple[int, float] = (10, 1.0),  # (bucket_size, refill_rate)
         key_prefix: str = "rl:v2:",
         limit_loader: Optional[Callable[[str, str], Tuple[int, float]]] = None,
-        metrics: Optional[object] = None
+        metrics: Optional[object] = None,
     ):
         self.redis_url = redis_url
         self.default_bucket = default_bucket
@@ -43,7 +46,9 @@ class TokenBucketRateLimiter:
 
     async def connect(self):
         if not self.redis:
-            self.redis = Redis.from_url(self.redis_url, encoding="utf-8", decode_responses=True)
+            self.redis = Redis.from_url(
+                self.redis_url, encoding="utf-8", decode_responses=True
+            )
 
     def _bucket_key(self, tenant_id: str, user_id: str, model: str) -> str:
         base = f"{_sanitize(tenant_id)}:{_sanitize(user_id)}:{_sanitize(model)}"
@@ -88,15 +93,16 @@ class TokenBucketRateLimiter:
                 await self.metrics.record_rate_limit(tenant_id, model)
             raise RateLimitExceeded("Rate limit exceeded, попробуйте позже.")
 
+
 # Пример динамического загрузчика лимитов из YAML
 class ConfigBasedLimitLoader:
     def __init__(self, config_path: str):
         with open(config_path) as f:
             self.config = yaml.safe_load(f)
+
     async def __call__(self, tenant_id: str, model: str) -> Tuple[int, float]:
-        tenant_cfg = self.config.get('tenants', {}).get(tenant_id, {})
-        model_limits = tenant_cfg.get('models', {}).get(model)
+        tenant_cfg = self.config.get("tenants", {}).get(tenant_id, {})
+        model_limits = tenant_cfg.get("models", {}).get(model)
         if model_limits:
             return tuple(model_limits)
-        return tuple(tenant_cfg.get('default', self.config['default']))
-
+        return tuple(tenant_cfg.get("default", self.config["default"]))

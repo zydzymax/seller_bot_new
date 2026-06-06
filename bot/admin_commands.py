@@ -4,27 +4,21 @@ Admin Commands Handler
 """
 
 import os
-from typing import Optional
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from utils.conversation_logger import (
-    get_conversation_db,
-    ConversationOutcome
-)
+from utils.conversation_logger import get_conversation_db
 from utils.simple_learner import get_learner
 from utils.domain_loader import (
     get_current_domain_name,
     get_domain_loader,
-    switch_domain
+    switch_domain,
 )
 
 
 # Admin user IDs (from env)
 ADMIN_CHAT_IDS = [
-    int(x.strip())
-    for x in os.getenv('ADMIN_CHAT_IDS', '').split(',')
-    if x.strip()
+    int(x.strip()) for x in os.getenv("ADMIN_CHAT_IDS", "").split(",") if x.strip()
 ]
 
 
@@ -47,7 +41,9 @@ async def cmd_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     /result conv_12345 fail no_budget Клиент сказал дорого
     """
     if not is_admin(update.effective_chat.id):
-        await update.message.reply_text("⛔ Эта команда доступна только администраторам")
+        await update.message.reply_text(
+            "⛔ Эта команда доступна только администраторам"
+        )
         return
 
     if not context.args or len(context.args) < 2:
@@ -66,7 +62,7 @@ async def cmd_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conversation_id = context.args[0]
     outcome = context.args[1].lower()
 
-    if outcome not in ['success', 'fail']:
+    if outcome not in ["success", "fail"]:
         await update.message.reply_text("❌ Outcome должен быть 'success' или 'fail'")
         return
 
@@ -77,7 +73,7 @@ async def cmd_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reason = context.args[2]
 
     if len(context.args) > 3:
-        notes = ' '.join(context.args[3:])
+        notes = " ".join(context.args[3:])
 
     # Сохранить feedback
     db = get_conversation_db()
@@ -88,8 +84,25 @@ async def cmd_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
             outcome=outcome,
             reason=reason,
             feedback_by=f"admin_{update.effective_user.id}",
-            notes=notes
+            notes=notes,
         )
+
+        learner_feedback = ""
+        variant_info = db.get_last_selected_variant(conversation_id)
+        if variant_info:
+            learner = get_learner()
+            learner.record_outcome(
+                variant_info["variant_context"],
+                variant_info["variant_id"],
+                success=(outcome == "success"),
+            )
+            learner.save()
+            learner_feedback = (
+                f"\nLearner: обновлён вариант {variant_info['variant_id']} "
+                f"в контексте {variant_info['variant_context']}"
+            )
+        else:
+            learner_feedback = "\nLearner: подходящий вариант для обновления не найден"
 
         await update.message.reply_text(
             f"✅ Результат сохранен!\n\n"
@@ -97,6 +110,7 @@ async def cmd_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Outcome: {outcome}\n"
             f"Reason: {reason or 'не указана'}\n"
             f"Notes: {notes or 'нет'}"
+            f"{learner_feedback}"
         )
 
     except Exception as e:
@@ -111,7 +125,9 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     /stats [domain]
     """
     if not is_admin(update.effective_chat.id):
-        await update.message.reply_text("⛔ Эта команда доступна только администраторам")
+        await update.message.reply_text(
+            "⛔ Эта команда доступна только администраторам"
+        )
         return
 
     domain = context.args[0] if context.args else None
@@ -129,20 +145,22 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if domain:
         text += f"Domain: {domain}\n\n"
 
-    total = sum(s['count'] for s in stats.values())
+    total = sum(s["count"] for s in stats.values())
 
     text += f"Всего диалогов: {total}\n\n"
 
-    for outcome, data in sorted(stats.items(), key=lambda x: x[1]['count'], reverse=True):
-        count = data['count']
-        avg_msg = data['avg_messages']
+    for outcome, data in sorted(
+        stats.items(), key=lambda x: x[1]["count"], reverse=True
+    ):
+        count = data["count"]
+        avg_msg = data["avg_messages"]
         percentage = (count / total * 100) if total > 0 else 0
 
         text += f"{outcome}:\n"
         text += f"  • Количество: {count} ({percentage:.1f}%)\n"
         text += f"  • Средняя длина: {avg_msg:.1f} сообщений\n\n"
 
-    await update.message.reply_text(text, parse_mode='Markdown')
+    await update.message.reply_text(text, parse_mode="Markdown")
 
 
 async def cmd_learning_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -153,7 +171,9 @@ async def cmd_learning_stats(update: Update, context: ContextTypes.DEFAULT_TYPE)
     /learning_stats [context]
     """
     if not is_admin(update.effective_chat.id):
-        await update.message.reply_text("⛔ Эта команда доступна только администраторам")
+        await update.message.reply_text(
+            "⛔ Эта команда доступна только администраторам"
+        )
         return
 
     ctx = context.args[0] if context.args else None
@@ -180,11 +200,11 @@ async def cmd_learning_stats(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # Telegram message limit - split if needed
     if len(text) > 4000:
-        parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
+        parts = [text[i : i + 4000] for i in range(0, len(text), 4000)]
         for part in parts:
-            await update.message.reply_text(part, parse_mode='Markdown')
+            await update.message.reply_text(part, parse_mode="Markdown")
     else:
-        await update.message.reply_text(text, parse_mode='Markdown')
+        await update.message.reply_text(text, parse_mode="Markdown")
 
 
 async def cmd_switch_domain(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -195,7 +215,9 @@ async def cmd_switch_domain(update: Update, context: ContextTypes.DEFAULT_TYPE):
     /switch_domain <domain_name>
     """
     if not is_admin(update.effective_chat.id):
-        await update.message.reply_text("⛔ Эта команда доступна только администраторам")
+        await update.message.reply_text(
+            "⛔ Эта команда доступна только администраторам"
+        )
         return
 
     if not context.args:
@@ -212,7 +234,7 @@ async def cmd_switch_domain(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "\nДля переключения:\n"
         text += "/switch_domain <domain_name>"
 
-        await update.message.reply_text(text, parse_mode='Markdown')
+        await update.message.reply_text(text, parse_mode="Markdown")
         return
 
     domain_name = context.args[0]
@@ -225,7 +247,7 @@ async def cmd_switch_domain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Новый режим: **{new_config.domain}**\n"
             f"Версия: {new_config.version}\n"
             f"Описание: {new_config.description}",
-            parse_mode='Markdown'
+            parse_mode="Markdown",
         )
 
     except Exception as e:
@@ -238,7 +260,7 @@ async def cmd_domain_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     config = get_current_domain_config()
 
-    text = f"**Текущий режим бота**\n\n"
+    text = "**Текущий режим бота**\n\n"
     text += f"Domain: {config.domain}\n"
     text += f"Version: {config.version}\n"
     text += f"Language: {config.language}\n"
@@ -247,13 +269,15 @@ async def cmd_domain_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += f"Slots defined: {len(config.slots.get('slots', []))}\n"
     text += f"States defined: {len(config.states.get('states', []))}\n"
 
-    await update.message.reply_text(text, parse_mode='Markdown')
+    await update.message.reply_text(text, parse_mode="Markdown")
 
 
 async def cmd_admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /admin_help - справка по админ-командам"""
     if not is_admin(update.effective_chat.id):
-        await update.message.reply_text("⛔ Эта команда доступна только администраторам")
+        await update.message.reply_text(
+            "⛔ Эта команда доступна только администраторам"
+        )
         return
 
     text = """
@@ -280,17 +304,17 @@ async def cmd_admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /switch_domain ai_seller_self
 """
 
-    await update.message.reply_text(text, parse_mode='Markdown')
+    await update.message.reply_text(text, parse_mode="Markdown")
 
 
 # Export handlers
 ADMIN_COMMAND_HANDLERS = {
-    'result': cmd_result,
-    'stats': cmd_stats,
-    'learning_stats': cmd_learning_stats,
-    'switch_domain': cmd_switch_domain,
-    'domain': cmd_domain_info,
-    'admin_help': cmd_admin_help
+    "result": cmd_result,
+    "stats": cmd_stats,
+    "learning_stats": cmd_learning_stats,
+    "switch_domain": cmd_switch_domain,
+    "domain": cmd_domain_info,
+    "admin_help": cmd_admin_help,
 }
 
 
@@ -308,5 +332,6 @@ def setup_admin_handlers(application):
         application.add_handler(CommandHandler(command_name, handler_func))
 
     from utils.logging import get_logger
+
     logger = get_logger(__name__)
     logger.info(f"Registered {len(ADMIN_COMMAND_HANDLERS)} admin command handlers")

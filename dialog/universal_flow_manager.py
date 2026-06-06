@@ -8,12 +8,10 @@ import os
 import json
 import time
 from typing import Dict, Any, Optional, List
-from dataclasses import dataclass, field, asdict
-from enum import Enum
+from dataclasses import dataclass, field
 
 import redis.asyncio as redis
 from telegram import Bot
-from telegram.error import TelegramError
 
 from utils.logging import get_logger
 from utils.domain_loader import get_current_domain_config, get_current_domain_name
@@ -21,17 +19,13 @@ from utils.conversation_logger import (
     get_conversation_db,
     ConversationLog,
     LeadAttributes,
-    ConversationOutcome
 )
 from utils.simple_learner import get_learner
 from llm.orchestrator import get_orchestrator
 from dialog.intent_helpers import (
-    is_agreement,
     is_decision_maker_self,
-    is_rejection,
     quick_slot_extraction,
     get_intent,
-    extract_number
 )
 
 logger = get_logger(__name__)
@@ -40,6 +34,7 @@ logger = get_logger(__name__)
 @dataclass
 class UniversalDialogContext:
     """Универсальный контекст диалога"""
+
     conversation_id: str
     chat_id: int
     user_id: int
@@ -65,34 +60,36 @@ class UniversalDialogContext:
     def to_dict(self) -> dict:
         """Convert to dict for Redis storage"""
         return {
-            'conversation_id': self.conversation_id,
-            'chat_id': self.chat_id,
-            'user_id': self.user_id,
-            'domain': self.domain,
-            'current_state': self.current_state,
-            'slots': self.slots,
-            'started_at': self.started_at,
-            'last_message_at': self.last_message_at,
-            'message_count': self.message_count,
-            'greeted_today': self.greeted_today,
-            'message_history': self.message_history[-10:]  # Храним последние 10 сообщений
+            "conversation_id": self.conversation_id,
+            "chat_id": self.chat_id,
+            "user_id": self.user_id,
+            "domain": self.domain,
+            "current_state": self.current_state,
+            "slots": self.slots,
+            "started_at": self.started_at,
+            "last_message_at": self.last_message_at,
+            "message_count": self.message_count,
+            "greeted_today": self.greeted_today,
+            "message_history": self.message_history[
+                -10:
+            ],  # Храним последние 10 сообщений
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'UniversalDialogContext':
+    def from_dict(cls, data: dict) -> "UniversalDialogContext":
         """Create from dict (Redis load)"""
         return cls(
-            conversation_id=data['conversation_id'],
-            chat_id=data['chat_id'],
-            user_id=data['user_id'],
-            domain=data.get('domain', 'unknown'),
-            current_state=data.get('current_state', 'GREETING'),
-            slots=data.get('slots', {}),
-            started_at=data.get('started_at', time.time()),
-            last_message_at=data.get('last_message_at', time.time()),
-            message_count=data.get('message_count', 0),
-            greeted_today=data.get('greeted_today', False),
-            message_history=data.get('message_history', [])
+            conversation_id=data["conversation_id"],
+            chat_id=data["chat_id"],
+            user_id=data["user_id"],
+            domain=data.get("domain", "unknown"),
+            current_state=data.get("current_state", "GREETING"),
+            slots=data.get("slots", {}),
+            started_at=data.get("started_at", time.time()),
+            last_message_at=data.get("last_message_at", time.time()),
+            message_count=data.get("message_count", 0),
+            greeted_today=data.get("greeted_today", False),
+            message_history=data.get("message_history", []),
         )
 
 
@@ -108,7 +105,7 @@ class UniversalFlowManager:
         self.domain_name = get_current_domain_name()
 
         # Redis для хранения контекста
-        redis_url = os.getenv('REDIS_ADDR', 'redis://localhost:6379/0')
+        redis_url = os.getenv("REDIS_ADDR", "redis://localhost:6379/0")
         self.redis_client = redis.from_url(redis_url, decode_responses=False)
 
         # LLM orchestrator (initialized lazily)
@@ -121,7 +118,7 @@ class UniversalFlowManager:
         self.learner = get_learner()
 
         # Telegram bot
-        token = os.getenv('TELEGRAM_TOKEN')
+        token = os.getenv("TELEGRAM_TOKEN")
         self.bot = Bot(token=token) if token else None
 
         logger.info(f"UniversalFlowManager initialized for domain: {self.domain_name}")
@@ -139,7 +136,7 @@ class UniversalFlowManager:
         try:
             cached_data = await self.redis_client.get(key)
             if cached_data:
-                data = json.loads(cached_data.decode('utf-8'))
+                data = json.loads(cached_data.decode("utf-8"))
                 return UniversalDialogContext.from_dict(data)
         except Exception as e:
             logger.error(f"Error loading context from Redis: {e}")
@@ -150,7 +147,7 @@ class UniversalFlowManager:
             chat_id=chat_id,
             user_id=chat_id,  # Для Telegram обычно совпадает
             domain=self.domain_name,
-            current_state="GREETING"
+            current_state="GREETING",
         )
 
         return context
@@ -158,7 +155,7 @@ class UniversalFlowManager:
     async def save_context(self, context: UniversalDialogContext):
         """Сохранить контекст в Redis"""
         key = f"universal_dialog:context:{context.chat_id}"
-        ttl = int(os.getenv('SESSION_TTL_SEC', '3600'))
+        ttl = int(os.getenv("SESSION_TTL_SEC", "3600"))
 
         try:
             data_json = json.dumps(context.to_dict(), default=str)
@@ -171,7 +168,7 @@ class UniversalFlowManager:
         user_info: Dict[str, Any],
         message_text: str,
         message_data: Dict[str, Any],
-        update: Dict[str, Any]
+        update: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
         Обработать входящее сообщение (совместимость с old flow_manager)
@@ -185,13 +182,13 @@ class UniversalFlowManager:
         Returns:
             Dict с результатом обработки
         """
-        chat_id = user_info.get('chat_id')
-        update_id = update.get('update_id')
+        chat_id = user_info.get("chat_id")
+        update_id = update.get("update_id")
 
         try:
             # Load context
             context = await self.get_context(chat_id)
-            context.user_id = user_info.get('user_id', chat_id)
+            context.user_id = user_info.get("user_id", chat_id)
             context.message_count += 1
             context.last_message_at = time.time()
 
@@ -199,7 +196,7 @@ class UniversalFlowManager:
             self.conv_db.save_message(
                 conversation_id=context.conversation_id,
                 role="user",
-                content=message_text
+                content=message_text,
             )
 
             # Добавляем сообщение в историю контекста
@@ -207,7 +204,9 @@ class UniversalFlowManager:
 
             # Получаем последнее сообщение бота для контекста
             last_bot_message = ""
-            for msg in reversed(context.message_history[:-1]):  # Исключаем только что добавленное
+            for msg in reversed(
+                context.message_history[:-1]
+            ):  # Исключаем только что добавленное
                 if msg.get("role") == "assistant":
                     last_bot_message = msg.get("content", "")
                     break
@@ -231,13 +230,19 @@ class UniversalFlowManager:
                 logger.info("Set decision_authority = owner via pattern match")
 
             # ===== LLM ЭКСТРАКЦИЯ (для сложных случаев) =====
-            logger.info(f"Extracting slots from message: '{message_text[:50]}...', state: {context.current_state}")
+            logger.info(
+                f"Extracting slots from message: '{message_text[:50]}...', state: {context.current_state}"
+            )
             extracted_slots = await self._extract_slots(message_text, context)
             logger.info(f"LLM extracted slots result: {extracted_slots}")
 
             # Update context slots (не перезаписываем уже заполненные)
             for slot_name, slot_value in extracted_slots.items():
-                if slot_value is not None and slot_value != "null" and slot_name not in context.slots:
+                if (
+                    slot_value is not None
+                    and slot_value != "null"
+                    and slot_name not in context.slots
+                ):
                     context.slots[slot_name] = slot_value
                     logger.info(f"LLM saved slot: {slot_name} = {slot_value}")
 
@@ -259,7 +264,7 @@ class UniversalFlowManager:
             self.conv_db.save_message(
                 conversation_id=context.conversation_id,
                 role="assistant",
-                content=response
+                content=response,
             )
 
             # Добавляем ответ бота в историю
@@ -275,10 +280,10 @@ class UniversalFlowManager:
             self._update_conversation_log(context)
 
             return {
-                'status': 'ok',
-                'state': context.current_state,
-                'response_sent': True,
-                'conversation_id': context.conversation_id
+                "status": "ok",
+                "state": context.current_state,
+                "response_sent": True,
+                "conversation_id": context.conversation_id,
             }
 
         except Exception as e:
@@ -288,32 +293,28 @@ class UniversalFlowManager:
             error_msg = "Извините, произошла ошибка. Попробуйте еще раз."
             try:
                 await self._send_telegram_message(chat_id, error_msg, update_id)
-            except:
+            except Exception:
                 pass
 
-            return {
-                'status': 'error',
-                'error': str(e),
-                'response_sent': False
-            }
+            return {"status": "error", "error": str(e), "response_sent": False}
 
-    async def _send_telegram_message(self, chat_id: int, text: str, update_id: Optional[int] = None):
+    async def _send_telegram_message(
+        self, chat_id: int, text: str, update_id: Optional[int] = None
+    ):
         """Отправить сообщение через Telegram Bot API"""
         if not self.bot:
             logger.warning("Telegram bot not initialized, skipping message send")
             return
 
         try:
-            await self.bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                parse_mode=None
-            )
+            await self.bot.send_message(chat_id=chat_id, text=text, parse_mode=None)
             logger.info(f"Message sent to {chat_id}", update_id=update_id)
         except Exception as e:
             logger.error(f"Error sending Telegram message: {e}")
 
-    async def _extract_slots(self, message_text: str, context: UniversalDialogContext) -> Dict[str, Any]:
+    async def _extract_slots(
+        self, message_text: str, context: UniversalDialogContext
+    ) -> Dict[str, Any]:
         """
         Извлечь slots из сообщения
 
@@ -324,7 +325,7 @@ class UniversalFlowManager:
         if not current_state_config:
             return {}
 
-        collect_slots = current_state_config.get('collect_slots', [])
+        collect_slots = current_state_config.get("collect_slots", [])
         if not collect_slots:
             return {}
 
@@ -342,17 +343,20 @@ class UniversalFlowManager:
         last_bot_message = ""
         for msg in reversed(context.message_history):
             if msg.get("role") == "assistant":
-                last_bot_message = msg.get("content", "")[:200]  # Берем первые 200 символов
+                last_bot_message = msg.get("content", "")[
+                    :200
+                ]  # Берем первые 200 символов
                 break
 
         # Use LLM to extract
-        extraction_prompt = self._build_extraction_prompt(message_text, slots_to_extract, last_bot_message)
+        extraction_prompt = self._build_extraction_prompt(
+            message_text, slots_to_extract, last_bot_message
+        )
 
         try:
             llm = await self.get_llm()
             llm_response = await llm.generate_response(
-                user_prompt=extraction_prompt,
-                context={'chat_id': context.chat_id}
+                user_prompt=extraction_prompt, context={"chat_id": context.chat_id}
             )
 
             # Parse response (expecting JSON)
@@ -363,9 +367,11 @@ class UniversalFlowManager:
             logger.error(f"Error extracting slots: {e}")
             return {}
 
-    def _build_extraction_prompt(self, message: str, slots: List[Dict], last_bot_message: str = "") -> str:
+    def _build_extraction_prompt(
+        self, message: str, slots: List[Dict], last_bot_message: str = ""
+    ) -> str:
         """Создать промпт для extraction с контекстом"""
-        prompt = f"""Извлеки данные из ответа пользователя.
+        prompt = """Извлеки данные из ответа пользователя.
 
 """
         if last_bot_message:
@@ -377,7 +383,7 @@ class UniversalFlowManager:
 """
         for slot in slots:
             prompt += f"\n- {slot['name']}: {slot.get('description', '')}"
-            if 'examples' in slot:
+            if "examples" in slot:
                 prompt += f" (примеры значений: {', '.join(slot['examples'][:3])})"
 
         prompt += """
@@ -396,10 +402,11 @@ class UniversalFlowManager:
         try:
             # Try to find JSON in response
             import re
-            json_match = re.search(r'\{[^}]+\}', response)
+
+            json_match = re.search(r"\{[^}]+\}", response)
             if json_match:
                 return json.loads(json_match.group(0))
-        except:
+        except Exception:
             pass
 
         return {}
@@ -413,11 +420,11 @@ class UniversalFlowManager:
             return
 
         # Check transitions
-        transitions = current_state_config.get('transitions', [])
+        transitions = current_state_config.get("transitions", [])
 
         for transition in transitions:
-            to_state = transition.get('to')
-            condition = transition.get('condition', '')
+            to_state = transition.get("to")
+            condition = transition.get("condition", "")
 
             # Simple condition evaluation
             if self._evaluate_condition(condition, context):
@@ -432,16 +439,18 @@ class UniversalFlowManager:
                     conversation_id=context.conversation_id,
                     from_state=old_state,
                     to_state=to_state,
-                    trigger=condition
+                    trigger=condition,
                 )
 
                 # Сбрасываем флаг согласия после перехода
-                if '_user_agreed' in context.slots:
-                    del context.slots['_user_agreed']
+                if "_user_agreed" in context.slots:
+                    del context.slots["_user_agreed"]
 
                 break
 
-    def _evaluate_condition(self, condition: str, context: UniversalDialogContext) -> bool:
+    def _evaluate_condition(
+        self, condition: str, context: UniversalDialogContext
+    ) -> bool:
         """
         Простая оценка условия
 
@@ -457,7 +466,7 @@ class UniversalFlowManager:
         # Check for specific patterns
         if "all_" in condition and "_slots_filled" in condition:
             # Extract stage name
-            match = re.search(r'all_(\w+)_slots_filled', condition)
+            match = re.search(r"all_(\w+)_slots_filled", condition)
             if match:
                 stage = match.group(1).upper()
                 return self._are_stage_slots_filled(stage, context)
@@ -470,38 +479,44 @@ class UniversalFlowManager:
 
         if "qualified" in condition:
             # Проверяем заполнены ли QUALIFY слоты
-            return self._are_stage_slots_filled('QUALIFY', context)
+            return self._are_stage_slots_filled("QUALIFY", context)
 
         if "is_decision_maker" in condition:
-            authority = context.slots.get('decision_authority')
-            return authority in ['owner', 'decision_maker']
+            authority = context.slots.get("decision_authority")
+            return authority in ["owner", "decision_maker"]
 
         if "client_interested_in_pricing" in condition:
             # Переход в OFFER когда DIAGNOSE слоты заполнены ИЛИ пользователь согласился
-            diagnose_filled = self._are_stage_slots_filled('DIAGNOSE', context)
-            user_agreed = context.slots.get('_user_agreed', False)
+            diagnose_filled = self._are_stage_slots_filled("DIAGNOSE", context)
+            user_agreed = context.slots.get("_user_agreed", False)
             return diagnose_filled or user_agreed
 
         if "budget_matches" in condition:
-            return 'budget_range' in context.slots
+            return "budget_range" in context.slots
 
         if "no_objections" in condition:
             return True  # Пока без системы отслеживания возражений
 
         if "all_close_slots_filled" in condition:
-            return self._are_stage_slots_filled('CLOSE', context)
+            return self._are_stage_slots_filled("CLOSE", context)
 
         # Проверка на согласие пользователя (для любых условий)
         if "user_agreed" in condition or "agreement" in condition:
-            user_agreed = context.slots.get('_user_agreed', False)
+            user_agreed = context.slots.get("_user_agreed", False)
 
             # Дополнительная проверка на "has_some_X_data"
             if "has_some_qualify_data" in condition:
-                has_data = 'business_niche' in context.slots or 'current_lead_volume' in context.slots
+                has_data = (
+                    "business_niche" in context.slots
+                    or "current_lead_volume" in context.slots
+                )
                 return user_agreed and has_data
 
             if "has_some_diagnose_data" in condition:
-                has_data = 'decision_authority' in context.slots or 'pain_point' in context.slots
+                has_data = (
+                    "decision_authority" in context.slots
+                    or "pain_point" in context.slots
+                )
                 return user_agreed and has_data
 
             return user_agreed
@@ -509,9 +524,11 @@ class UniversalFlowManager:
         # Default: НЕ переходить если условие неизвестно
         return False
 
-    def _are_stage_slots_filled(self, stage: str, context: UniversalDialogContext) -> bool:
+    def _are_stage_slots_filled(
+        self, stage: str, context: UniversalDialogContext
+    ) -> bool:
         """Проверить заполнены ли все slots этапа"""
-        collection_order = self.domain_config.slots.get('collection_order', {})
+        collection_order = self.domain_config.slots.get("collection_order", {})
         required_slots = collection_order.get(stage, [])
 
         for slot_name in required_slots:
@@ -520,7 +537,9 @@ class UniversalFlowManager:
 
         return True
 
-    async def _generate_response(self, context: UniversalDialogContext, message_text: str) -> str:
+    async def _generate_response(
+        self, context: UniversalDialogContext, message_text: str
+    ) -> str:
         """
         Генерировать ответ бота
 
@@ -536,14 +555,16 @@ class UniversalFlowManager:
         missing_slots = self._get_missing_slots(context)
 
         # Фильтруем внутренние слоты
-        visible_slots = {k: v for k, v in context.slots.items() if not k.startswith('_')}
+        visible_slots = {
+            k: v for k, v in context.slots.items() if not k.startswith("_")
+        }
 
         llm_context = {
-            'current_state': context.current_state,
-            'collected_slots': visible_slots,
-            'missing_slots': missing_slots,
-            'message_count': context.message_count,
-            'domain': context.domain
+            "current_state": context.current_state,
+            "collected_slots": visible_slots,
+            "missing_slots": missing_slots,
+            "message_count": context.message_count,
+            "domain": context.domain,
         }
 
         # Добавляем явное напоминание в system_prompt о собранных данных
@@ -605,8 +626,20 @@ class UniversalFlowManager:
             system_prompt += f"\n\n[RECOMMENDED APPROACH]: {variant_content}"
 
             # Store variant_id in context for later feedback
-            context.slots['_last_variant_id'] = variant_id
-            context.slots['_last_variant_context'] = learner_context
+            context.slots["_last_variant_id"] = variant_id
+            context.slots["_last_variant_context"] = learner_context
+            try:
+                self.conv_db.save_event(
+                    conversation_id=context.conversation_id,
+                    event_type="variant_selected",
+                    event_data={
+                        "variant_id": variant_id,
+                        "variant_context": learner_context,
+                        "state": context.current_state,
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save variant_selected event: {e}")
 
         # Generate response
         try:
@@ -615,7 +648,9 @@ class UniversalFlowManager:
                 user_prompt=message_text,
                 context=llm_context,
                 system_prompt=system_prompt,  # Передаем промпт домена
-                message_history=context.message_history[:-1]  # Передаем историю (без текущего сообщения)
+                message_history=context.message_history[
+                    :-1
+                ],  # Передаем историю (без текущего сообщения)
             )
 
             return llm_response.content
@@ -630,7 +665,7 @@ class UniversalFlowManager:
         if not current_state_config:
             return []
 
-        collect_slots = current_state_config.get('collect_slots', [])
+        collect_slots = current_state_config.get("collect_slots", [])
         missing = []
 
         for slot_name in collect_slots:
@@ -641,33 +676,23 @@ class UniversalFlowManager:
 
     def _get_state_config(self, state_name: str) -> Optional[Dict]:
         """Получить конфигурацию state"""
-        states = self.domain_config.states.get('states', [])
+        states = self.domain_config.states.get("states", [])
         for state in states:
-            if state.get('name') == state_name:
+            if state.get("name") == state_name:
                 return state
         return None
 
     def _get_slot_config(self, slot_name: str) -> Optional[Dict]:
         """Получить конфигурацию slot"""
-        slots = self.domain_config.slots.get('slots', [])
+        slots = self.domain_config.slots.get("slots", [])
         for slot in slots:
-            if slot.get('name') == slot_name:
+            if slot.get("name") == slot_name:
                 return slot
         return None
 
     def _update_conversation_log(self, context: UniversalDialogContext):
         """Обновить лог диалога в БД"""
         # Update conversation
-        conv_data = {
-            'conversation_id': context.conversation_id,
-            'chat_id': context.chat_id,
-            'user_id': context.user_id,
-            'domain': context.domain,
-            'started_at': context.started_at,
-            'last_message_at': context.last_message_at,
-            'message_count': context.message_count,
-            'current_state': context.current_state,
-        }
 
         # Create ConversationLog object
         conv_log = ConversationLog(
@@ -680,7 +705,7 @@ class UniversalFlowManager:
             message_count=context.message_count,
             current_state=context.current_state,
             collected_slots=context.slots,
-            lead_attrs=self._build_lead_attributes(context)
+            lead_attrs=self._build_lead_attributes(context),
         )
 
         self.conv_db.save_conversation(conv_log)
@@ -691,13 +716,13 @@ class UniversalFlowManager:
 
         # Map slots to lead attributes
         slot_mapping = {
-            'business_niche': 'business_niche',
-            'current_lead_volume': 'lead_volume',
-            'lead_channels': 'lead_channels',
-            'pain_point': 'pain_point',
-            'current_solution': 'current_solution',
-            'decision_authority': 'decision_authority',
-            'budget_range': 'budget_range',
+            "business_niche": "business_niche",
+            "current_lead_volume": "lead_volume",
+            "lead_channels": "lead_channels",
+            "pain_point": "pain_point",
+            "current_solution": "current_solution",
+            "decision_authority": "decision_authority",
+            "budget_range": "budget_range",
         }
 
         for slot_name, attr_name in slot_mapping.items():

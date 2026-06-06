@@ -74,3 +74,4 @@ temp/
 tmp/
 *.backup.*
 *.json
+scripts/backup-prod.sh.bak

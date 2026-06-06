@@ -1,8 +1,10 @@
 import sys
 import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import asyncio
 from dialog.flow_manager import FlowManager
+
 
 async def main():
     # Выбери нужного LLM: "claude" или "openai"
@@ -17,6 +19,6 @@ async def main():
     except Exception as e:
         print(f"Ошибка: {e}")
 
+
 if __name__ == "__main__":
     asyncio.run(main())
-

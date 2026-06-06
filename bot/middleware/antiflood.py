@@ -10,22 +10,27 @@ antiflood.py — production-ready антифлуд middleware для SoVAni AI-�
 
 import asyncio
 import hashlib
+import logging
 import time
-from typing import Optional
 
 try:
     from cachetools import TTLCache
 except ImportError:
     TTLCache = dict  # fallback, но рекомендую установить cachetools
 
+logger = logging.getLogger(__name__)
+
+
 # Prometheus placeholder (реальную логику добавить при интеграции)
 def prometheus_flood_event(user_id_hash):
     pass
+
 
 class AsyncRedisFloodControl:
     """
     Redis-реализация скользящего окна (Lua-скрипт, атомарность)
     """
+
     LUA_SCRIPT = """
     local key = KEYS[1]
     local now = tonumber(ARGV[1])
@@ -41,7 +46,9 @@ class AsyncRedisFloodControl:
     return 0
     """
 
-    def __init__(self, redis, rate_limit: int = 3, interval_sec: int = 10, fallback=None):
+    def __init__(
+        self, redis, rate_limit: int = 3, interval_sec: int = 10, fallback=None
+    ):
         self.redis = redis
         self.rate_limit = rate_limit
         self.interval_sec = interval_sec
@@ -60,13 +67,15 @@ class AsyncRedisFloodControl:
             return bool(result)
         except Exception as e:
             # Fallback на in-memory
-            print(f"[WARN] Redis error in antiflood: {e}")
+            logger.warning("Redis error in antiflood: %s", e)
             return await self.fallback.is_flooding(user_id)
+
 
 class InMemoryFloodControl:
     """
     Асинхронный in-memory TTLCache с автоочисткой.
     """
+
     def __init__(self, rate_limit: int = 3, interval_sec: int = 10, max_size=10000):
         self.rate_limit = rate_limit
         self.interval_sec = interval_sec
@@ -88,10 +97,12 @@ class InMemoryFloodControl:
             # Автоочистка устаревших user_id (TTLCache делает это автоматически)
             return False
 
+
 class AntiFloodMiddleware:
     """
     DI-ready антифлуд middleware: Redis или in-memory, безопасное логирование
     """
+
     def __init__(self, redis=None, rate_limit=3, interval_sec=10):
         if redis:
             self.backend = AsyncRedisFloodControl(redis, rate_limit, interval_sec)
@@ -101,13 +112,15 @@ class AntiFloodMiddleware:
     async def is_flooding(self, user_id: int) -> bool:
         return await self.backend.is_flooding(user_id)
 
+
 # ---- Для теста ----
 if __name__ == "__main__":
+
     async def test():
         flood = InMemoryFloodControl(rate_limit=2, interval_sec=3)
         uid = 12345
         for i in range(5):
             print(f"Test {i}: flooding = {await flood.is_flooding(uid)}")
             await asyncio.sleep(1)
-    asyncio.run(test())
 
+    asyncio.run(test())

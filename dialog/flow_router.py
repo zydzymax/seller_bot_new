@@ -12,6 +12,7 @@ from utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+
 # Domain enum (local copy to avoid circular dependency)
 class Domain:
     TEXTILE_MANUFACTURING = "textile_manufacturing"
@@ -20,7 +21,7 @@ class Domain:
 
 def get_current_domain_name() -> str:
     """Get current domain from environment or default"""
-    return os.getenv('AI_SELLER_DOMAIN', Domain.TEXTILE_MANUFACTURING)
+    return os.getenv("AI_SELLER_DOMAIN", Domain.TEXTILE_MANUFACTURING)
 
 
 class FlowRouter:
@@ -43,12 +44,14 @@ class FlowRouter:
         if self.domain == Domain.TEXTILE_MANUFACTURING:
             # Use old flow manager
             from dialog.flow_manager import get_flow_manager
+
             self.flow_manager = await get_flow_manager()
             logger.info("Using legacy FlowManager for textile_manufacturing")
 
         elif self.domain == Domain.AI_SELLER_SELF:
             # Use new two-layer flow manager (pre-bot + AI seller)
             from dialog.two_layer_flow_manager import get_two_layer_flow_manager
+
             self.flow_manager = get_two_layer_flow_manager()
             logger.info("Using TwoLayerFlowManager for ai_seller_self")
 
@@ -56,6 +59,7 @@ class FlowRouter:
             logger.error(f"Unknown domain: {self.domain}")
             # Fallback to textile
             from dialog.flow_manager import get_flow_manager
+
             self.flow_manager = await get_flow_manager()
             logger.warning("Falling back to textile_manufacturing FlowManager")
 
@@ -66,7 +70,7 @@ class FlowRouter:
         user_info: Dict[str, Any],
         message_text: str,
         message_data: Dict[str, Any],
-        update: Dict[str, Any]
+        update: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
         Обработать сообщение через правильный flow manager
@@ -86,7 +90,7 @@ class FlowRouter:
             user_info=user_info,
             message_text=message_text,
             message_data=message_data,
-            update=update
+            update=update,
         )
 
     async def process_callback_query(
@@ -94,7 +98,7 @@ class FlowRouter:
         user_info: Dict[str, Any],
         callback_data: str,
         message_data: Dict[str, Any],
-        update: Dict[str, Any]
+        update: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
         Обработать callback query (для inline кнопок)
@@ -111,18 +115,20 @@ class FlowRouter:
         await self._init_flow_manager()
 
         # Check if flow manager has callback query method
-        if hasattr(self.flow_manager, 'process_callback_query'):
+        if hasattr(self.flow_manager, "process_callback_query"):
             return await self.flow_manager.process_callback_query(
                 user_info=user_info,
                 callback_data=callback_data,
                 message_data=message_data,
-                update=update
+                update=update,
             )
         else:
-            logger.warning(f"Flow manager {type(self.flow_manager).__name__} doesn't support callback queries")
+            logger.warning(
+                f"Flow manager {type(self.flow_manager).__name__} doesn't support callback queries"
+            )
             return {
-                'status': 'unsupported',
-                'message': 'Callback queries not supported in this mode'
+                "status": "unsupported",
+                "message": "Callback queries not supported in this mode",
             }
 
     async def reload(self):

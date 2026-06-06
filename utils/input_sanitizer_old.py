@@ -13,47 +13,48 @@ input_sanitizer.py — Санитизация пользовательского
 import os
 import re
 import unicodedata
-from typing import Optional, List, Dict, Any
-from pathlib import Path
-import yaml
 
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 # Настройки из ENV
-MAX_INPUT_LENGTH = int(os.getenv('MAX_INPUT_CHARS', '2000'))
-ENABLE_UNICODE_NORMALIZATION = os.getenv('SANITIZER_NORMALIZE_UNICODE', 'true').lower() == 'true'
-ENABLE_XSS_PROTECTION = os.getenv('SANITIZER_XSS_PROTECTION', 'true').lower() == 'true'
+MAX_INPUT_LENGTH = int(os.getenv("MAX_INPUT_CHARS", "2000"))
+ENABLE_UNICODE_NORMALIZATION = (
+    os.getenv("SANITIZER_NORMALIZE_UNICODE", "true").lower() == "true"
+)
+ENABLE_XSS_PROTECTION = os.getenv("SANITIZER_XSS_PROTECTION", "true").lower() == "true"
 
 # Базовые паттерны prompt injection
 DEFAULT_PROMPT_INJECTION_PATTERNS = [
-    r'ignore\s*previous\s*instructions',
-    r'change\s*role',
-    r'system\s*prompt', 
-    r'you\s*are\s*no\s*longer',
-    r'developer\s*mode',
-    r'debug\s*mode',
-    r'выведи\s*системный\s*промпт',
-    r'игнорируй\s*инструкции',
-    r'поменяй\s*роль',
-    r'представь\s*что\s*предыдущ(?:ие|их|ий|е|й)?',
+    r"ignore\s*previous\s*instructions",
+    r"change\s*role",
+    r"system\s*prompt",
+    r"you\s*are\s*no\s*longer",
+    r"developer\s*mode",
+    r"debug\s*mode",
+    r"выведи\s*системный\s*промпт",
+    r"игнорируй\s*инструкции",
+    r"поменяй\s*роль",
+    r"представь\s*что\s*предыдущ(?:ие|их|ий|е|й)?",
 ]
+PROMPT_INJECTION_PATTERNS = DEFAULT_PROMPT_INJECTION_PATTERNS
 
 # XSS паттерны
 XSS_PATTERNS = [
-    r'<\w+[^>]*>',
-    r'</\w+>',
-    r'<\w+[^>]*>.*?</\w+>',
-    r'on\w+\s*=',
-    r'javascript:',
-    r'alert\s*\(',
-    r'document\.',
-    r'window\.',
-    r'eval\s*\(',
-    r'script\s*:',
-    r'script',
+    r"<\w+[^>]*>",
+    r"</\w+>",
+    r"<\w+[^>]*>.*?</\w+>",
+    r"on\w+\s*=",
+    r"javascript:",
+    r"alert\s*\(",
+    r"document\.",
+    r"window\.",
+    r"eval\s*\(",
+    r"script\s*:",
+    r"script",
 ]
+
 
 def normalize_text(text: str) -> str:
     """Нормализует unicode, приводит в нижний регистр, е/ё — к 'е', убирает гомоглифы и спецсимволы"""
@@ -62,16 +63,27 @@ def normalize_text(text: str) -> str:
     text = text.replace("ё", "е")
     gl_map = {
         # Вынужденно добавляем русские буквы, оставляем "е" кириллицу!
-        'і': 'i', 'е': 'е', 'а': 'а', 'о': 'о', 'с': 'с',
-        'р': 'р', 'у': 'у', 'к': 'к', 'х': 'х', 'в': 'в',
-        'н': 'н', 'т': 'т', 'м': 'м'
+        "і": "i",
+        "е": "е",
+        "а": "а",
+        "о": "о",
+        "с": "с",
+        "р": "р",
+        "у": "у",
+        "к": "к",
+        "х": "х",
+        "в": "в",
+        "н": "н",
+        "т": "т",
+        "м": "м",
     }
     for bad, good in gl_map.items():
         text = text.replace(bad, good)
-    text = re.sub(r'[\u200b-\u200f\u202a-\u202e\u2060\ufffc]', '', text)
-    text = re.sub(r'[^a-zа-яё0-9\s]', '', text)
-    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r"[\u200b-\u200f\u202a-\u202e\u2060\ufffc]", "", text)
+    text = re.sub(r"[^a-zа-яё0-9\s]", "", text)
+    text = re.sub(r"\s+", " ", text)
     return text.strip()
+
 
 def sanitize_input(user_input: str) -> str:
     if not isinstance(user_input, str):
@@ -79,7 +91,7 @@ def sanitize_input(user_input: str) -> str:
 
     sanitized = user_input[:MAX_INPUT_LENGTH]
     sanitized = unicodedata.normalize("NFKC", sanitized)
-    sanitized = re.sub(r'[\u200b-\u200f\u202a-\u202e\u2060\ufffc]', '', sanitized)
+    sanitized = re.sub(r"[\u200b-\u200f\u202a-\u202e\u2060\ufffc]", "", sanitized)
 
     for pat in XSS_PATTERNS:
         sanitized = re.sub(pat, "[удалено]", sanitized, flags=re.IGNORECASE | re.DOTALL)
@@ -91,10 +103,13 @@ def sanitize_input(user_input: str) -> str:
         if re.search(pat, normalized, re.IGNORECASE):
             return "❗️Извините, ваш запрос не может быть обработан."
 
-    if re.search(r'(?:[A-Za-z0-9+/]{4}){6,}', sanitized) or re.search(r'(?:\b[0-9a-f]{6,}\b)', sanitized, re.IGNORECASE):
+    if re.search(r"(?:[A-Za-z0-9+/]{4}){6,}", sanitized) or re.search(
+        r"(?:\b[0-9a-f]{6,}\b)", sanitized, re.IGNORECASE
+    ):
         return "❗️Извините, ваш запрос выглядит подозрительно."
 
     return sanitized.strip()
+
 
 if __name__ == "__main__":
     test_cases = [
@@ -107,7 +122,7 @@ if __name__ == "__main__":
         "прЕдставь что предыдущЁе",
         "представь что предыдущий",
         "PD94bWwgdmVyc2lvbj0iMS4wIj8+",
-        "Обычный вопрос пользователя"
+        "Обычный вопрос пользователя",
     ]
     for s in test_cases:
         print(f"> {s}\n{sanitize_input(s)}\n")

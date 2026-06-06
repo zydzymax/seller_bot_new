@@ -2,6 +2,7 @@
 validators.py — базовые валидаторы для сообщений пользователя и FSM.
 """
 
+
 def validate_input(message: str, state=None):
     """
     Базовая валидация пользовательского ввода для FSM.
@@ -13,4 +14,3 @@ def validate_input(message: str, state=None):
         return False, "Сообщение слишком длинное"
     # Можно добавить доп. проверки под свою FSM
     return True, ""
-

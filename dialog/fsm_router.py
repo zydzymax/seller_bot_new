@@ -67,48 +67,54 @@ def decide_next_stage(
     if contact or is_contact_info(user_message):
         context.client_contact = contact or user_message.strip()
         context.contact_captured = True
-        logger.info(f"FSM: Contact detected → CLOSED")
+        logger.info("FSM: Contact detected → CLOSED")
         return "CLOSED"
 
     # Мягкий отказ → NURTURE
     if is_soft_opt_out(user_message):
         context.soft_opt_out = True
-        logger.info(f"FSM: Soft opt-out detected → NURTURE")
+        logger.info("FSM: Soft opt-out detected → NURTURE")
         return "NURTURE"
 
     # Вопрос о цене → PRICE_DISCUSSION (на любой стадии после PREBOT)
     if is_price_question(user_message) and current_stage not in ["PREBOT", "DIAG_Q"]:
         context.user_asked_price_recently = True
-        logger.info(f"FSM: Price question detected → PRICE_DISCUSSION")
+        logger.info("FSM: Price question detected → PRICE_DISCUSSION")
         return "PRICE_DISCUSSION"
 
     # Возражение по цене → OBJECTION_HANDLING
     if is_price_objection(user_message) and current_stage not in ["PREBOT", "DIAG_Q"]:
         context.objection_type = "price"
-        logger.info(f"FSM: Price objection detected → OBJECTION_HANDLING")
+        logger.info("FSM: Price objection detected → OBJECTION_HANDLING")
         return "OBJECTION_HANDLING"
 
     # Возражение по времени → OBJECTION_HANDLING
     if is_timing_objection(user_message) and current_stage not in ["PREBOT", "DIAG_Q"]:
         context.objection_type = "timing"
-        logger.info(f"FSM: Timing objection detected → OBJECTION_HANDLING")
+        logger.info("FSM: Timing objection detected → OBJECTION_HANDLING")
         return "OBJECTION_HANDLING"
 
     # Конкурент → OBJECTION_HANDLING
-    if is_competitor_objection(user_message) and current_stage not in ["PREBOT", "DIAG_Q"]:
+    if is_competitor_objection(user_message) and current_stage not in [
+        "PREBOT",
+        "DIAG_Q",
+    ]:
         context.objection_type = "competitor"
-        logger.info(f"FSM: Competitor objection detected → OBJECTION_HANDLING")
+        logger.info("FSM: Competitor objection detected → OBJECTION_HANDLING")
         return "OBJECTION_HANDLING"
 
     # "Я подумаю" → OBJECTION_HANDLING
-    if is_think_about_objection(user_message) and current_stage not in ["PREBOT", "DIAG_Q"]:
+    if is_think_about_objection(user_message) and current_stage not in [
+        "PREBOT",
+        "DIAG_Q",
+    ]:
         context.objection_type = "think_about"
-        logger.info(f"FSM: Think about objection detected → OBJECTION_HANDLING")
+        logger.info("FSM: Think about objection detected → OBJECTION_HANDLING")
         return "OBJECTION_HANDLING"
 
     # Явный сигнал закрытия → CLOSING
     if is_closing_signal(user_message) and current_stage not in ["PREBOT", "DIAG_Q"]:
-        logger.info(f"FSM: Closing signal detected → CLOSING")
+        logger.info("FSM: Closing signal detected → CLOSING")
         return "CLOSING"
 
     # ===== СТАДИЙНЫЕ ПЕРЕХОДЫ =====
@@ -130,7 +136,7 @@ def decide_next_stage(
 
         if context.diag_question_index >= MAX_DIAG_QUESTIONS:
             context.problem_clarified = True
-            logger.info(f"FSM: DIAG_Q complete → NEED_SUMMARY")
+            logger.info("FSM: DIAG_Q complete → NEED_SUMMARY")
             return "NEED_SUMMARY"
         else:
             logger.info(f"FSM: DIAG_Q question {context.diag_question_index + 1}")
@@ -139,31 +145,31 @@ def decide_next_stage(
     elif current_stage == "NEED_SUMMARY":
         # После NEED_SUMMARY всегда идём в VALUE_PITCH
         context.has_need_summary = True
-        logger.info(f"FSM: NEED_SUMMARY done → VALUE_PITCH")
+        logger.info("FSM: NEED_SUMMARY done → VALUE_PITCH")
         return "VALUE_PITCH"
 
     elif current_stage == "VALUE_PITCH":
         # После VALUE_PITCH проверяем реакцию
         if is_positive_confirmation(user_message):
             context.value_pitch_done = True
-            logger.info(f"FSM: Positive confirmation → COMMIT_TEST")
+            logger.info("FSM: Positive confirmation → COMMIT_TEST")
             return "COMMIT_TEST"
         else:
             # Нейтральный ответ — тоже переходим в COMMIT_TEST
             context.value_pitch_done = True
-            logger.info(f"FSM: VALUE_PITCH done → COMMIT_TEST")
+            logger.info("FSM: VALUE_PITCH done → COMMIT_TEST")
             return "COMMIT_TEST"
 
     elif current_stage == "COMMIT_TEST":
         # После COMMIT_TEST проверяем интерес
         if is_positive_confirmation(user_message):
             context.commit_test_done = True
-            logger.info(f"FSM: Interest confirmed → CLOSING")
+            logger.info("FSM: Interest confirmed → CLOSING")
             return "CLOSING"
         else:
             # Нейтральный ответ — переходим в CLOSING
             context.commit_test_done = True
-            logger.info(f"FSM: COMMIT_TEST done → CLOSING")
+            logger.info("FSM: COMMIT_TEST done → CLOSING")
             return "CLOSING"
 
     elif current_stage == "PRICE_DISCUSSION":
@@ -173,7 +179,7 @@ def decide_next_stage(
             context.objection_type = "price"
             return "OBJECTION_HANDLING"
         else:
-            logger.info(f"FSM: Price discussed → CLOSING")
+            logger.info("FSM: Price discussed → CLOSING")
             return "CLOSING"
 
     elif current_stage == "OBJECTION_HANDLING":
@@ -181,16 +187,16 @@ def decide_next_stage(
         if context.objection_type == "price":
             context.price_objection_count += 1
             if context.price_objection_count >= 3:
-                logger.info(f"FSM: Too many price objections → NURTURE")
+                logger.info("FSM: Too many price objections → NURTURE")
                 return "NURTURE"
 
         # Проверяем реакцию
         if is_positive_confirmation(user_message) or is_closing_signal(user_message):
-            logger.info(f"FSM: Objection handled, interest → CLOSING")
+            logger.info("FSM: Objection handled, interest → CLOSING")
             return "CLOSING"
         else:
             # Остаёмся в текущей стадии или переходим в CLOSING
-            logger.info(f"FSM: Objection handled → CLOSING")
+            logger.info("FSM: Objection handled → CLOSING")
             return "CLOSING"
 
     elif current_stage == "CLOSING":
@@ -199,7 +205,7 @@ def decide_next_stage(
 
         if context.closing_attempts >= 2:
             # Слишком много попыток — предлагаем чек-лист
-            logger.info(f"FSM: Too many closing attempts → NURTURE")
+            logger.info("FSM: Too many closing attempts → NURTURE")
             return "NURTURE"
 
         # Остаёмся в CLOSING
@@ -209,7 +215,7 @@ def decide_next_stage(
         # В NURTURE остаёмся или завершаем
         context.nurture_offers_made += 1
         if context.nurture_offers_made >= 2:
-            logger.info(f"FSM: Nurture complete → CLOSED")
+            logger.info("FSM: Nurture complete → CLOSED")
             return "CLOSED"
         return "NURTURE"
 
@@ -414,8 +420,8 @@ def get_force_move_prompt(context: "TwoLayerContext", user_message: str) -> str:
         Промпт для LLM
     """
     slots = context.slots
-    niche = slots.get("niche", "ваша сфера")
-    leads = slots.get("leads_per_month", "ваши заявки")
+    slots.get("niche", "ваша сфера")
+    slots.get("leads_per_month", "ваши заявки")
 
     return f"""🛑 ПРИНУДИТЕЛЬНЫЙ ВЫХОД ИЗ РЕЖИМА УТОЧНЕНИЙ
 

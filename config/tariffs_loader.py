@@ -8,18 +8,17 @@ import os
 import yaml
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
-from functools import lru_cache
 
 # Путь к конфигу тарифов
 TARIFFS_CONFIG_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "saleswhisper_tariffs.yaml"
+    os.path.dirname(__file__), "saleswhisper_tariffs.yaml"
 )
 
 
 @dataclass
 class Tariff:
     """Тариф SalesWhisper"""
+
     id: str
     name: str
     price_min: int
@@ -49,7 +48,7 @@ class Tariff:
             "short_desc": self.short_desc,
             "features": self.features,
             "suitable_for": self.suitable_for,
-            "is_popular": self.is_popular
+            "is_popular": self.is_popular,
         }
 
 
@@ -63,24 +62,26 @@ class TariffsConfig:
 
     def _load_config(self) -> Dict[str, Any]:
         """Загрузить конфиг из YAML"""
-        with open(self.config_path, 'r', encoding='utf-8') as f:
+        with open(self.config_path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
 
     def _parse_tariffs(self) -> List[Tariff]:
         """Распарсить тарифы в объекты"""
         tariffs = []
         for t in self._config.get("tariffs", []):
-            tariffs.append(Tariff(
-                id=t["id"],
-                name=t["name"],
-                price_min=t["price_min"],
-                price_max=t.get("price_max"),
-                label=t["label"],
-                short_desc=t.get("short_desc", ""),
-                features=t.get("features", []),
-                suitable_for=t.get("suitable_for", ""),
-                is_popular=t.get("is_popular", False)
-            ))
+            tariffs.append(
+                Tariff(
+                    id=t["id"],
+                    name=t["name"],
+                    price_min=t["price_min"],
+                    price_max=t.get("price_max"),
+                    label=t["label"],
+                    short_desc=t.get("short_desc", ""),
+                    features=t.get("features", []),
+                    suitable_for=t.get("suitable_for", ""),
+                    is_popular=t.get("is_popular", False),
+                )
+            )
         return tariffs
 
     @property
@@ -102,7 +103,9 @@ class TariffsConfig:
 
     def get_tariff_by_leads(self, leads_per_month: int) -> Tariff:
         """Рекомендовать тариф по объёму заявок"""
-        recommendations = self._config.get("bot_rules", {}).get("tariff_recommendations", [])
+        recommendations = self._config.get("bot_rules", {}).get(
+            "tariff_recommendations", []
+        )
 
         for rec in recommendations:
             max_leads = rec.get("leads_max")
@@ -133,7 +136,7 @@ class TariffsConfig:
         """Ответ при бюджете ниже минимального"""
         return self._config.get("bot_rules", {}).get(
             "low_budget_response",
-            "К сожалению, минимальная стоимость внедрения ИИ-продавца — 25 000 ₽."
+            "К сожалению, минимальная стоимость внедрения ИИ-продавца — 25 000 ₽.",
         )
 
     def format_tariffs_for_prompt(self) -> str:
@@ -149,10 +152,7 @@ class TariffsConfig:
 
     def format_tariffs_short(self) -> str:
         """Краткий список тарифов"""
-        return "\n".join([
-            f"• {t.name}: {t.format_price()}"
-            for t in self._tariffs
-        ])
+        return "\n".join([f"• {t.name}: {t.format_price()}" for t in self._tariffs])
 
 
 # Глобальный инстанс (singleton)
@@ -177,7 +177,9 @@ def get_tariffs() -> List[Tariff]:
     return get_tariffs_config().tariffs
 
 
-def recommend_tariff(leads_per_month: int = None, budget: int = None) -> Optional[Tariff]:
+def recommend_tariff(
+    leads_per_month: int = None, budget: int = None
+) -> Optional[Tariff]:
     """Рекомендовать тариф по параметрам"""
     config = get_tariffs_config()
 

@@ -1,10 +1,12 @@
 """
 base.py — расширенный интерфейс и структуры для LLM-провайдеров SoVAni.
 """
+
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import List, Dict, Optional, Any, Callable
+
 
 class ModelType(str, Enum):
     GPT_4_TURBO = "gpt-4-turbo"
@@ -18,6 +20,7 @@ class ModelType(str, Enum):
         """Регистрация новой модели динамически (если надо)"""
         cls._member_map_[name.upper()] = name.lower()
         return name.lower()
+
 
 @dataclass
 class LLMRequest:
@@ -37,10 +40,12 @@ class LLMRequest:
             raise ValueError("max_tokens out of range")
         # Можно добавить больше проверок
 
+
 @dataclass
 class LLMError:
     code: str
     message: str
+
 
 @dataclass
 class LLMResponse:
@@ -54,6 +59,7 @@ class LLMResponse:
     quality: Optional[float] = None  # опционально, если будем оценивать
     version: str = "v1"
 
+
 class LLMProvider(ABC):
     """
     Абстрактный интерфейс для любого LLM-провайдера.
@@ -66,7 +72,9 @@ class LLMProvider(ABC):
         """
         pass
 
-    async def stream_generate(self, request: LLMRequest, on_chunk: Optional[Callable[[str], None]] = None) -> LLMResponse:
+    async def stream_generate(
+        self, request: LLMRequest, on_chunk: Optional[Callable[[str], None]] = None
+    ) -> LLMResponse:
         """
         (Необязательно) Потоковая генерация для LLM с поддержкой streaming.
         По умолчанию NotImplemented.
@@ -86,4 +94,3 @@ class LLMProvider(ABC):
         Доступность провайдера для работы.
         """
         pass
-

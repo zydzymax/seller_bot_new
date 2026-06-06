@@ -30,6 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from utils.logging import get_logger
@@ -40,43 +41,43 @@ logger = get_logger(__name__)
 
 def parse_args():
     """Parse command line arguments"""
-    parser = argparse.ArgumentParser(description='AI Seller Bot Runner')
+    parser = argparse.ArgumentParser(description="AI Seller Bot Runner")
     parser.add_argument(
-        '--mode',
-        choices=['webhook', 'polling'],
-        default=os.getenv('BOT_MODE', 'webhook'),
-        help='Bot mode: webhook or polling'
+        "--mode",
+        choices=["webhook", "polling"],
+        default=os.getenv("BOT_MODE", "webhook"),
+        help="Bot mode: webhook or polling",
     )
     parser.add_argument(
-        '--domain',
-        choices=['textile_manufacturing', 'ai_seller_self'],
+        "--domain",
+        choices=["textile_manufacturing", "ai_seller_self"],
         default=None,
-        help='Override domain (default: from AI_SELLER_DOMAIN env var)'
+        help="Override domain (default: from AI_SELLER_DOMAIN env var)",
     )
     parser.add_argument(
-        '--port',
+        "--port",
         type=int,
-        default=int(os.getenv('WEBHOOK_PORT', '8000')),
-        help='Webhook port (default: 8000)'
+        default=int(os.getenv("WEBHOOK_PORT", "8000")),
+        help="Webhook port (default: 8000)",
     )
     parser.add_argument(
-        '--host',
-        default=os.getenv('WEBHOOK_HOST', '0.0.0.0'),
-        help='Webhook host (default: 0.0.0.0)'
+        "--host",
+        default=os.getenv("WEBHOOK_HOST", "0.0.0.0"),
+        help="Webhook host (default: 0.0.0.0)",
     )
     return parser.parse_args()
 
 
 async def run_polling_mode():
     """Run bot in polling mode (development)"""
-    from telegram.ext import Application, CommandHandler, MessageHandler, filters
+    from telegram.ext import Application, MessageHandler, filters
     from bot.admin_commands import setup_admin_handlers
     from bot.message_router import route_user_message
 
     logger.info("🔧 Starting bot in POLLING mode")
 
     # Get Telegram token
-    token = os.getenv('TELEGRAM_TOKEN')
+    token = os.getenv("TELEGRAM_TOKEN")
     if not token:
         logger.error("TELEGRAM_TOKEN not set in environment")
         sys.exit(1)
@@ -99,7 +100,7 @@ async def run_polling_mode():
     logger.info(f"📱 Domain: {get_current_domain_name()}")
     logger.info("💡 Send /admin_help to see available commands")
 
-    await application.run_polling(allowed_updates=['message'])
+    await application.run_polling(allowed_updates=["message"])
 
 
 def run_webhook_mode(host: str, port: int):
@@ -117,7 +118,7 @@ def run_webhook_mode(host: str, port: int):
         port=port,
         log_config=None,  # Use our logger
         access_log=False,
-        workers=int(os.getenv('UVICORN_WORKERS', '1'))
+        workers=int(os.getenv("UVICORN_WORKERS", "1")),
     )
 
 
@@ -147,7 +148,7 @@ def main():
     logger.info(f"🚀 Bot mode: {args.mode}")
 
     # Run bot
-    if args.mode == 'polling':
+    if args.mode == "polling":
         logger.info("⚠️  Polling mode - for development only!")
         asyncio.run(run_polling_mode())
     else:

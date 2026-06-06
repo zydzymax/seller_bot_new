@@ -16,11 +16,19 @@ logger = get_logger(__name__)
 # ЖЁСТКО ЗАДАННЫЕ МОДЕЛИ — НЕ МЕНЯТЬ БЕЗ СОГЛАСОВАНИЯ
 BASE_MODEL = "gpt-4.1-mini"
 SENIOR_MODEL = "gpt-5.1"
+LEADS_THRESHOLD = 100
 
 # ЛПР, которые считаются "серьёзными" для включения старшей модели
 SERIOUS_DECISION_MAKERS = {
-    "я", "self", "owner", "founder", "владелец",
-    "директор", "собственник", "сам", "лично я"
+    "я",
+    "self",
+    "owner",
+    "founder",
+    "владелец",
+    "директор",
+    "собственник",
+    "сам",
+    "лично я",
 }
 
 # Режимы, при которых может включаться старшая модель
@@ -28,7 +36,7 @@ SENIOR_MODES = {
     "price_objection",
     "closing",
     "competitor_objection",
-    "timing_objection"
+    "timing_objection",
 }
 
 
@@ -68,11 +76,9 @@ def select_model(mode: str, context: Dict[str, Any]) -> str:
 
     # Проверяем условия для старшей модели
     if mode in SENIOR_MODES:
-        if leads >= 100 and dm in SERIOUS_DECISION_MAKERS:
+        if leads >= LEADS_THRESHOLD and dm in SERIOUS_DECISION_MAKERS:
             model = SENIOR_MODEL
-            logger.info(
-                f"SENIOR_MODEL selected: mode={mode}, leads={leads}, dm={dm}"
-            )
+            logger.info(f"SENIOR_MODEL selected: mode={mode}, leads={leads}, dm={dm}")
 
     return model
 
@@ -82,7 +88,7 @@ async def generate_response(
     context: Dict[str, Any],
     messages: List[Dict[str, str]],
     system_prompt: str = None,
-    model_override: str = None
+    model_override: str = None,
 ) -> str:
     """
     Генерация ответа через OpenAI API.
@@ -130,11 +136,7 @@ async def generate_response(
             user_prompt = "Продолжи диалог."
 
         # Добавляем mode в context для отладки
-        enriched_context = {
-            **context,
-            "ai_seller_mode": mode,
-            "ai_seller_model": model
-        }
+        enriched_context = {**context, "ai_seller_mode": mode, "ai_seller_model": model}
 
         # Первая попытка с выбранной моделью
         response = await orchestrator.generate_response(
@@ -142,7 +144,7 @@ async def generate_response(
             context=enriched_context,
             force_model=model,
             system_prompt=system_prompt,
-            message_history=messages[:-1] if len(messages) > 1 else None
+            message_history=messages[:-1] if len(messages) > 1 else None,
         )
 
         logger.info(
@@ -167,7 +169,7 @@ async def generate_response(
                     context=enriched_context,
                     force_model=BASE_MODEL,
                     system_prompt=system_prompt,
-                    message_history=messages[:-1] if len(messages) > 1 else None
+                    message_history=messages[:-1] if len(messages) > 1 else None,
                 )
 
                 logger.info(f"Fallback successful: model={BASE_MODEL}")

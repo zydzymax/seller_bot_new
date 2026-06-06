@@ -1,0 +1,13 @@
+version: "3.8"
+
+# Security override for local-only service ports.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.secure.yml up -d
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5436:5432"
+
+  redis:
+    ports:
+      - "127.0.0.1:6383:6379"

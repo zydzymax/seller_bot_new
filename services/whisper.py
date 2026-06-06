@@ -20,6 +20,7 @@ SUPPORTED_FORMATS = {"ogg", "mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm"}
 
 class WhisperTranscriptionError(Exception):
     """Ошибка транскрипции"""
+
     pass
 
 
@@ -27,23 +28,20 @@ class WhisperService:
     """Сервис транскрипции голоса через OpenAI Whisper"""
 
     def __init__(
-        self,
-        api_key: Optional[str] = None,
-        timeout: int = 60,
-        max_retries: int = 3
+        self, api_key: Optional[str] = None, timeout: int = 60, max_retries: int = 3
     ):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.timeout = timeout
         self.max_retries = max_retries
+        self.model = os.getenv("STT_MODEL", "gpt-4o-mini-transcribe")
+        self.fallback_model = os.getenv("STT_FALLBACK_MODEL", "whisper-1")
 
     def is_available(self) -> bool:
         """Проверяет доступность сервиса"""
         return bool(self.api_key)
 
     async def transcribe_file(
-        self,
-        file_path: str,
-        language: str = "ru"
+        self, file_path: str, language: str = "ru"
     ) -> Tuple[str, float]:
         """
         Транскрибирует аудио файл.
@@ -89,9 +87,9 @@ class WhisperService:
                     "file",
                     open(file_path, "rb"),
                     filename=file_path.name,
-                    content_type="audio/ogg"
+                    content_type="audio/ogg",
                 )
-                data.add_field("model", "whisper-1")
+                data.add_field("model", self.model)
                 data.add_field("language", language)
                 data.add_field("response_format", "verbose_json")
 
@@ -99,9 +97,7 @@ class WhisperService:
                     timeout=aiohttp.ClientTimeout(total=self.timeout)
                 ) as session:
                     async with session.post(
-                        WHISPER_API_URL,
-                        headers=headers,
-                        data=data
+                        WHISPER_API_URL, headers=headers, data=data
                     ) as resp:
                         latency = asyncio.get_event_loop().time() - start_time
 
@@ -114,14 +110,52 @@ class WhisperService:
                                 "whisper_api_error",
                                 status=resp.status,
                                 error=error_msg,
-                                attempt=attempt + 1
+                                attempt=attempt + 1,
+                                model=self.model,
                             )
 
                             # Retry on server errors
                             if resp.status >= 500:
                                 attempt += 1
-                                await asyncio.sleep(2 ** attempt)
+                                await asyncio.sleep(2**attempt)
                                 continue
+
+                            if self.model != self.fallback_model:
+                                logger.warning(
+                                    "whisper_fallback_model_used",
+                                    primary_model=self.model,
+                                    fallback_model=self.fallback_model,
+                                )
+                                fallback_data = aiohttp.FormData()
+                                fallback_data.add_field(
+                                    "file",
+                                    open(file_path, "rb"),
+                                    filename=file_path.name,
+                                    content_type="audio/ogg",
+                                )
+                                fallback_data.add_field("model", self.fallback_model)
+                                fallback_data.add_field("language", language)
+                                fallback_data.add_field(
+                                    "response_format", "verbose_json"
+                                )
+
+                                async with session.post(
+                                    WHISPER_API_URL, headers=headers, data=fallback_data
+                                ) as fallback_resp:
+                                    if fallback_resp.status == 200:
+                                        fallback_result = await fallback_resp.json()
+                                        return (
+                                            fallback_result.get("text", "").strip(),
+                                            fallback_result.get("duration", 0.0),
+                                        )
+
+                                    fallback_error = await fallback_resp.json()
+                                    fallback_msg = fallback_error.get("error", {}).get(
+                                        "message", str(fallback_error)
+                                    )
+                                    raise WhisperTranscriptionError(
+                                        f"Whisper fallback API error: {fallback_msg}"
+                                    )
 
                             raise WhisperTranscriptionError(
                                 f"Whisper API error: {error_msg}"
@@ -136,30 +170,26 @@ class WhisperService:
                             text_length=len(text),
                             duration=duration,
                             latency_ms=latency * 1000,
-                            language=language
+                            language=language,
                         )
 
                         return text, duration
 
             except asyncio.TimeoutError:
                 logger.warning(
-                    "whisper_timeout",
-                    attempt=attempt + 1,
-                    max_retries=self.max_retries
+                    "whisper_timeout", attempt=attempt + 1, max_retries=self.max_retries
                 )
                 last_error = "Request timeout"
                 attempt += 1
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(2**attempt)
 
             except aiohttp.ClientError as e:
                 logger.warning(
-                    "whisper_network_error",
-                    error=str(e),
-                    attempt=attempt + 1
+                    "whisper_network_error", error=str(e), attempt=attempt + 1
                 )
                 last_error = str(e)
                 attempt += 1
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(2**attempt)
 
             except Exception as e:
                 logger.exception("whisper_unexpected_error")
@@ -170,10 +200,7 @@ class WhisperService:
         )
 
     async def transcribe_telegram_voice(
-        self,
-        bot,
-        voice_file_id: str,
-        language: str = "ru"
+        self, bot, voice_file_id: str, language: str = "ru"
     ) -> Tuple[str, float]:
         """
         Скачивает и транскрибирует голосовое сообщение из Telegram.
@@ -190,21 +217,14 @@ class WhisperService:
         file = await bot.get_file(voice_file_id)
 
         # Создаём временный файл
-        with tempfile.NamedTemporaryFile(
-            suffix=".ogg",
-            delete=False
-        ) as tmp_file:
+        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp_file:
             tmp_path = tmp_file.name
 
         try:
             # Скачиваем файл
             await file.download_to_drive(tmp_path)
 
-            logger.info(
-                "voice_file_downloaded",
-                file_id=voice_file_id,
-                path=tmp_path
-            )
+            logger.info("voice_file_downloaded", file_id=voice_file_id, path=tmp_path)
 
             # Транскрибируем
             text, duration = await self.transcribe_file(tmp_path, language)
