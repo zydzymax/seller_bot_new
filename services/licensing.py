@@ -20,10 +20,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/license", tags=["licensing"])
 
 # Configuration
-POSTGRES_DSN = os.getenv(
-    "POSTGRES_DSN",
-    "postgresql://sovani:[REVOKED_SECRET_REMOVED]@127.0.0.1:5433/sovani_ai_seller",
-)
+POSTGRES_DSN = os.getenv("POSTGRES_DSN", "")
 TELEGRAM_BOT_TOKEN = os.getenv("SALES_BOT_TOKEN", "")
 TELEGRAM_ADMIN_CHAT_ID = os.getenv(
     "TELEGRAM_ADMIN_CHAT_ID", ""

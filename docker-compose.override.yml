@@ -6,9 +6,9 @@ services:
     container_name: saleswhisper_ai_seller
     environment:
       - APP_ENV=production
-      - POSTGRES_DSN=postgresql://sovani:${POSTGRES_PASSWORD:-[REVOKED_SECRET_REMOVED]}@postgres:5432/saleswhisper_ai_seller
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]}@redis:6379/0
-      - REDIS_ADDR=redis://:${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]}@redis:6379/0
+      - POSTGRES_DSN=postgresql://sovani:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/saleswhisper_ai_seller
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
+      - REDIS_ADDR=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}

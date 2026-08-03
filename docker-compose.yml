@@ -10,7 +10,7 @@ services:
     container_name: saleswhisper_seller_postgres
     environment:
       POSTGRES_USER: sovani
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-[REVOKED_SECRET_REMOVED]}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: saleswhisper_ai_seller
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -30,13 +30,13 @@ services:
   redis:
     image: redis:7-alpine
     container_name: saleswhisper_seller_redis
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     volumes:
       - redis_data:/data
     ports:
       - "6383:6379"
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]} ping | grep PONG"]
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD:?REDIS_PASSWORD is required} ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -66,12 +66,12 @@ services:
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
       
       # База данных
-      - POSTGRES_DSN=postgresql://sovani:${POSTGRES_PASSWORD:-[REVOKED_SECRET_REMOVED]}@postgres:5432/saleswhisper_ai_seller
+      - POSTGRES_DSN=postgresql://sovani:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/saleswhisper_ai_seller
       
       # Redis
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]}@saleswhisper_seller_redis:6379/0
-      - REDIS_ADDR=redis://:${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]}@saleswhisper_seller_redis:6379/0
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-[REVOKED_SECRET_REMOVED]}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@saleswhisper_seller_redis:6379/0
+      - REDIS_ADDR=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@saleswhisper_seller_redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       
       # Webhook настройки
       - WEBHOOK_HOST=0.0.0.0
