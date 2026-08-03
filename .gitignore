@@ -75,3 +75,4 @@ tmp/
 *.backup.*
 *.json
 scripts/backup-prod.sh.bak
+services_venv/
